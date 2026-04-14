@@ -44,7 +44,7 @@ export interface ZohoRecordSummary {
   zoho_salesorder_id: string;
   so_number: string;
   customer_name: string;
-  quantity: number;        // sum of all line-item quantities
+  line_items: { name: string; quantity: number }[];
   total: number;
 }
 
@@ -141,6 +141,13 @@ export class ReconciliationService {
     this.logger.log(`📅 Reconciling ${date} — DB: ${dbSales.length}, Zoho: ${zohoOrders.length}`);
 
     // PHASE 1 — COUNT CHECK
+
+    const zohoDetails = await this.zohoService.getSalesOrderDetails(
+      zohoOrders.map(o => o.salesorder_id),
+    );
+
+    const zohoDetailMap = new Map(zohoDetails.map(o => [o.salesorder_id, o]));
+
     if (dbSales.length !== zohoOrders.length) {
       return {
         date,
@@ -158,13 +165,19 @@ export class ReconciliationService {
           ].filter(Boolean).join(', '),
           total_sp: Number(s.total_sp),
         })),
-        zoho_records: zohoOrders.map(o => ({
-          zoho_salesorder_id: o.salesorder_id,
-          so_number: o.salesorder_number,
-          customer_name: o.customer_name,
-          quantity: (o.line_items ?? []).reduce((sum, i) => sum + i.quantity, 0),
-          total: Number(o.total),
-        })),
+        zoho_records: zohoOrders.map(o => {
+          const detail = zohoDetailMap.get(o.salesorder_id);
+          return {
+            zoho_salesorder_id: o.salesorder_id,
+            so_number: o.salesorder_number,
+            customer_name: o.customer_name,
+            line_items: (detail?.line_items ?? []).map(i => ({
+              name: i.name,
+              quantity: i.quantity,
+            })),
+            total: Number(o.total)
+          };
+        }),
       };
     }
 
