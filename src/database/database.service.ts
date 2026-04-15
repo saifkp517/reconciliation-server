@@ -8,12 +8,7 @@ export interface DbSale {
   invoice_no: string;
   sale_date: string;
   customer_name: string;
-  qty_4in: number | null;
-  unit_sp_4in: number | null;
-  qty_6in: number | null;
-  unit_sp_6in: number | null;
-  qty_8in: number | null;
-  unit_sp_8in: number | null;
+  items: { dimension: string; quantity: number; unit_sp: number; line_sp: number }[];
   total_sp: number;
   total_cp: number;
   profit: number;
@@ -53,76 +48,53 @@ export class DatabaseService {
     }, {} as Record<string, number>);
   }
 
-  async getSalesWithItems(fromDate: string, toDate: string): Promise<any[]> {
-    const sales = await this.saleRepository.query(
-      `
+  async getSalesWithItems(fromDate: string, toDate: string): Promise<DbSale[]> {
+    const rows = await this.saleRepository.query(`
     SELECT
-      s.sale_date                                                             AS "Date",
-      s.invoice_no                                                            AS "invoice_no",
-      c.name                                                                  AS "customer_name",
-
-      MAX(CASE WHEN si.dimension = '4 inches' THEN si.quantity END)          AS "qty_4in",
-      MAX(CASE WHEN si.dimension = '4 inches' THEN si.unit_sp END)           AS "unit_sp_4in",
-
-      MAX(CASE WHEN si.dimension = '6 inches' THEN si.quantity END)          AS "qty_6in",
-      MAX(CASE WHEN si.dimension = '6 inches' THEN si.unit_sp END)           AS "unit_sp_6in",
-
-      MAX(CASE WHEN si.dimension = '8 inches' THEN si.quantity END)          AS "qty_8in",
-      MAX(CASE WHEN si.dimension = '8 inches' THEN si.unit_sp END)           AS "unit_sp_8in",
-
-      MAX(CASE WHEN si.dimension = '4 inches' THEN si.unit_cp END)           AS "unit_cp_4in",
-      MAX(CASE WHEN si.dimension = '6 inches' THEN si.unit_cp END)           AS "unit_cp_6in",
-      MAX(CASE WHEN si.dimension = '8 inches' THEN si.unit_cp END)           AS "unit_cp_8in",
-
-      SUM(si.line_sp)                                                         AS "check_line_sp",
-
-      s.total_sp                                                              AS "total_sp",
-      s.total_cp                                                              AS "total_cp",
-      s.profit                                                                AS "profit",
-      s.profit - 1500                                                         AS "profit_summary",
-      s.profit_pct                                                            AS "profit_pct"
-
+      s.id            AS "id",
+      s.sale_date     AS "sale_date",
+      s.invoice_no    AS "invoice_no",
+      c.name          AS "customer_name",
+      s.total_sp      AS "total_sp",
+      s.total_cp      AS "total_cp",
+      s.profit        AS "profit",
+      s.profit_pct    AS "profit_pct",
+      si.dimension    AS "dimension",
+      si.quantity     AS "quantity",
+      si.unit_sp      AS "unit_sp",
+      si.line_sp      AS "line_sp"
     FROM sales s
     JOIN customers c   ON c.id = s.customer_id
     JOIN sale_items si ON si.sale_id = s.id
-
     WHERE s.sale_date BETWEEN $1 AND $2
-
-    GROUP BY
-      s.id, s.sale_date, s.invoice_no, c.name,
-      s.total_sp, s.total_cp, s.profit, s.profit_pct
-
     ORDER BY s.sale_date, s.invoice_no
-    `,
-      [fromDate, toDate],
-    );
+  `, [fromDate, toDate]);
 
-    return sales.map((row: any) => ({
-      sale_date: row.Date,
-      invoice_no: row.invoice_no,
-      customer_name: row.customer_name,
+    // Group rows by sale id
+    const saleMap = new Map<number, DbSale>();
+    for (const row of rows) {
+      if (!saleMap.has(row.id)) {
+        saleMap.set(row.id, {
+          id: Number(row.id),
+          sale_date: row.sale_date,
+          invoice_no: row.invoice_no,
+          customer_name: row.customer_name,
+          total_sp: Number(row.total_sp),
+          total_cp: Number(row.total_cp),
+          profit: Number(row.profit),
+          profit_pct: Number(row.profit_pct),
+          items: [],
+        });
+      }
+      saleMap.get(row.id)!.items.push({
+        dimension: row.dimension,
+        quantity: Number(row.quantity),
+        unit_sp: Number(row.unit_sp ?? 0),
+        line_sp: Number(row.line_sp ?? 0),
+      });
+    }
 
-      qty_4in: row.qty_4in != null ? Number(row.qty_4in) : null,
-      unit_sp_4in: row.unit_sp_4in != null ? Number(row.unit_sp_4in) : null,
-
-      qty_6in: row.qty_6in != null ? Number(row.qty_6in) : null,
-      unit_sp_6in: row.unit_sp_6in != null ? Number(row.unit_sp_6in) : null,
-
-      qty_8in: row.qty_8in != null ? Number(row.qty_8in) : null,
-      unit_sp_8in: row.unit_sp_8in != null ? Number(row.unit_sp_8in) : null,
-
-      unit_cp_4in: row.unit_cp_4in != null ? Number(row.unit_cp_4in) : null,
-      unit_cp_6in: row.unit_cp_6in != null ? Number(row.unit_cp_6in) : null,
-      unit_cp_8in: row.unit_cp_8in != null ? Number(row.unit_cp_8in) : null,
-
-      check_line_sp: Number(row.check_line_sp),
-
-      total_sp: Number(row.total_sp),
-      total_cp: Number(row.total_cp),
-      profit: Number(row.profit),
-      profit_summary: Number(row.profit_summary),
-      profit_pct: Number(row.profit_pct),
-    }));
+    return Array.from(saleMap.values());
   }
 
   // generic raw query escape hatch if ever needed

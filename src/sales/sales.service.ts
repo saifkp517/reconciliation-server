@@ -8,26 +8,27 @@ import { Customer } from '../database/entities/customer.entity';
 
 export interface CreateSaleDto {
   customer_id: number;
+  sale_date: string; // YYYY-MM-DD (recommended)
   items: {
     dimension: string;
     quantity: number;
     unit_sp: number;
-  }[]
+  }[];
 }
 
 const ITEM_CATALOG: Record<string, {
   zoho_item_id: string;
   unit_cp: number;
 }> = {
-  "4 inches": {
+  "BLOCK 4 inches": {
     zoho_item_id: "3644122000000051003",
     unit_cp: 28,
   },
-  "6 inches": {
+  "BLOCK 6 inches": {
     zoho_item_id: "3644122000000051021",
     unit_cp: 32,
   },
-  "8 inches": {
+  "BLOCK 8 inches": {
     zoho_item_id: "3644122000000051039",
     unit_cp: 36,
   },
@@ -53,25 +54,17 @@ export class SalesService {
 
   async createSale(dto: CreateSaleDto): Promise<Sale | null> {
 
-    const sale_date = new Date().toLocaleDateString('en-CA', {
-      timeZone: 'Asia/Kolkata',
-    });
-
-
-
     return this.dataSource.transaction(async manager => {
 
-      const today = new Date().toLocaleDateString('en-CA', {
-        timeZone: 'Asia/Kolkata',
-      }); // YYYY-MM-DD
+      const sale_date = dto.sale_date;
 
       const countToday = await manager.count(Sale, {
-        where: { sale_date: today },
+        where: { sale_date },
       });
 
       const sequence = String(countToday + 1).padStart(3, '0');
 
-      const invoice_no = `INV-${today.replace(/-/g, '')}-${sequence}`;
+      const invoice_no = `INV-${sale_date.replace(/-/g, '')}-${sequence}`;
       // step 1 — create sale header
       const sale = manager.create(Sale, {
         customer_id: dto.customer_id,
