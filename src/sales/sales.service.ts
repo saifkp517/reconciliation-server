@@ -115,4 +115,66 @@ export class SalesService {
       });
     });
   }
+
+  async getAllSales(): Promise<Sale[]> {
+    return this.saleRepository.find({
+      relations: ['items', 'customer'],
+      order: { sale_date: 'DESC', id: 'DESC' },
+    });
+  }
+
+  async updateSale(id: number, dto: Partial<CreateSaleDto>): Promise<Sale | null> {
+    return this.dataSource.transaction(async manager => {
+
+      const sale = await manager.findOne(Sale, {
+        where: { id },
+        relations: ['items'],
+      });
+
+      if (!sale) throw new Error(`Sale with id ${id} not found`);
+
+      // Update header fields if provided
+      if (dto.customer_id) await manager.update(Sale, id, { customer_id: dto.customer_id });
+      if (dto.sale_date) await manager.update(Sale, id, { sale_date: dto.sale_date });
+
+      // Replace items if provided
+      if (dto.items) {
+        await manager.delete(SaleItem, { sale_id: id });
+
+        const newItems = dto.items.map(item => {
+          const catalogItem = ITEM_CATALOG[item.dimension];
+          if (!catalogItem) throw new Error(`Invalid item dimension: ${item.dimension}`);
+
+          return manager.create(SaleItem, {
+            sale_id: id,
+            dimension: item.dimension,
+            quantity: item.quantity,
+            unit_sp: item.unit_sp,
+            unit_cp: catalogItem.unit_cp,
+            zoho_item_id: catalogItem.zoho_item_id,
+            name: item.dimension,
+            line_sp: item.unit_sp * item.quantity,
+            line_cp: catalogItem.unit_cp * item.quantity,
+          });
+        });
+
+        await manager.save(SaleItem, newItems);
+
+        // Recompute sale-level aggregates
+        const total_sp = newItems.reduce((sum, i) => sum + i.unit_sp * i.quantity, 0);
+        const total_cp = newItems.reduce((sum, i) => sum + i.unit_cp * i.quantity, 0);
+        const profit = total_sp - total_cp;
+        const profit_pct = total_sp > 0
+          ? Math.round((profit / total_sp) * 100 * 100) / 100
+          : 0;
+
+        await manager.update(Sale, id, { total_sp, total_cp, profit, profit_pct });
+      }
+
+      return manager.findOne(Sale, {
+        where: { id },
+        relations: ['items', 'customer'],
+      });
+    });
+  }
 }

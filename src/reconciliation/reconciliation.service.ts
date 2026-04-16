@@ -47,6 +47,12 @@ export interface ZohoRecordSummary {
   total: number;
 }
 
+export interface BillingSummary {
+  total_db_amount: number;        // sum of all db total_sp * 1.18
+  total_zoho_amount: number;      // sum of all zoho totals
+  difference: number;             // zoho - db (positive = lost, negative = saved)
+}
+
 export interface DayResult {
   date: string;
   status: DayStatus;
@@ -57,6 +63,7 @@ export interface DayResult {
   matched_pairs?: MatchedPairResult[];
   unmatched_db?: number[];
   unmatched_zoho?: string[];
+  billing_summary?: BillingSummary;
   error?: string;
 }
 
@@ -70,6 +77,23 @@ export interface ReconciliationReport {
     days_with_issues: number;
   };
   days: DayResult[];
+  billing_summary: BillingSummary;
+}
+
+function computeBillingSummary(dbSales: DbSale[], zohoOrders: ZohoSalesOrder[]): BillingSummary {
+  const total_db_amount = Math.round(
+    dbSales.reduce((sum, s) => sum + s.total_sp * 1.18, 0) * 100
+  ) / 100;
+
+  const total_zoho_amount = Math.round(
+    zohoOrders.reduce((sum, o) => sum + Number(o.total), 0) * 100
+  ) / 100;
+
+  return {
+    total_db_amount,
+    total_zoho_amount,
+    difference: Math.round((total_zoho_amount - total_db_amount) * 100) / 100,
+  };
 }
 
 // ---------- helpers ----------
@@ -174,7 +198,7 @@ export class ReconciliationService {
   constructor(
     private databaseService: DatabaseService,
     private zohoService: ZohoService,
-  ) {}
+  ) { }
 
   async reconcile(fromDate: string, toDate: string): Promise<ReconciliationReport> {
     this.logger.log(`🔁 Starting reconciliation from ${fromDate} to ${toDate}`);
@@ -209,6 +233,19 @@ export class ReconciliationService {
 
     const cleanDays = dayResults.filter(d => d.status === 'CLEAN').length;
 
+    const globalBilling: BillingSummary = {
+      total_db_amount: Math.round(
+        dayResults.reduce((sum, d) => sum + (d.billing_summary?.total_db_amount ?? 0), 0) * 100
+      ) / 100,
+      total_zoho_amount: Math.round(
+        dayResults.reduce((sum, d) => sum + (d.billing_summary?.total_zoho_amount ?? 0), 0) * 100
+      ) / 100,
+      difference: Math.round(
+        dayResults.reduce((sum, d) => sum + (d.billing_summary?.difference ?? 0), 0) * 100
+      ) / 100,
+    };
+
+
     return {
       from: fromDate,
       to: toDate,
@@ -219,6 +256,7 @@ export class ReconciliationService {
         days_with_issues: dayResults.length - cleanDays,
       },
       days: dayResults,
+      billing_summary: globalBilling,
     };
   }
 
@@ -251,6 +289,7 @@ export class ReconciliationService {
         zoho_count: zohoOrders.length,
         db_records: dbSales.map(dbToSummary),
         zoho_records: zohoDetails.map(zohoToSummary),
+        billing_summary: computeBillingSummary(dbSales, zohoDetails),
       };
     }
 
@@ -318,6 +357,7 @@ export class ReconciliationService {
       unmatched_zoho: Array.from(unmatchedZoho),
       db_records: dbSales.map(dbToSummary),
       zoho_records: zohoOrders.map(zohoToSummary),
+      billing_summary: computeBillingSummary(dbSales, zohoOrders),
     };
   }
 
