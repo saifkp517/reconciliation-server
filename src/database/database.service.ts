@@ -1,7 +1,7 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Between } from 'typeorm';
-import { Sale } from './entities/sale.entity';
+import { Sale } from '../sales/entities/sale.entity';
 
 export interface DbSale {
   id: number;

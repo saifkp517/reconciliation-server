@@ -45,6 +45,7 @@ export interface ZohoRecordSummary {
   customer_name: string;
   line_items: { name: string; quantity: number; unit_sp: number; line_total: number }[];
   total: number;
+  cached_at?: number;
 }
 
 export interface BillingSummary {
@@ -141,6 +142,7 @@ function zohoToSummary(o: ZohoSalesOrder): ZohoRecordSummary {
       line_total: Number(i.item_total),
     })),
     total: Number(o.total),
+    cached_at: o.cached_at,
   };
 }
 
@@ -203,6 +205,8 @@ export class ReconciliationService {
   async reconcile(fromDate: string, toDate: string): Promise<ReconciliationReport> {
     this.logger.log(`🔁 Starting reconciliation from ${fromDate} to ${toDate}`);
 
+
+    //bulk fetch zoho (gets all records between from and to date, could go to 1000-2000 records)
     const [dbSales, zohoOrders] = await Promise.all([
       this.databaseService.getSalesWithItems(fromDate, toDate),
       this.zohoService.listSalesOrders(fromDate, toDate),

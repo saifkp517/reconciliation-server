@@ -1,6 +1,7 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, OneToMany, JoinColumn } from 'typeorm';
-import { Customer } from './customer.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, OneToMany, JoinColumn, UpdateDateColumn } from 'typeorm';
+import { Customer } from '../../database/entities/customer.entity';
 import { SaleItem } from './sale-item.entity';
+import { SaleTruck } from '../../trucks/entities/sale-truck.entity';
 
 @Entity('sales')
 export class Sale {
@@ -34,6 +35,15 @@ export class Sale {
   @ManyToOne(() => Customer, customer => customer.sales)
   @JoinColumn({ name: 'customer_id' })
   customer!: Customer;
+
+  @OneToMany(() => SaleTruck, st => st.sale)
+  trucks!: SaleTruck[];
+
+  @CreateDateColumn()
+  createdAt!: Date;
+
+  @UpdateDateColumn()
+  updatedAt!: Date;
 
   @OneToMany(() => SaleItem, item => item.sale, { cascade: true })
   items!: SaleItem[];

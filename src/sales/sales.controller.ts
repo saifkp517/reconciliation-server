@@ -21,6 +21,11 @@ export class SalesController {
     return this.salesService.getAllSales();
   }
 
+  @Get(':id')
+  getSaleById(@Param('id') id: string) {
+    return this.salesService.getSaleById(Number(id));
+  }
+
   @Patch(':id')
   updateSale(@Param('id') id: string, @Body() dto: Partial<CreateSaleDto>) {
     return this.salesService.updateSale(Number(id), dto);
