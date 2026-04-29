@@ -16,9 +16,8 @@ export class ZohoCacheWarmService {
   ) { }
 
   async forceFetchList(fromDate: string, toDate: string): Promise<ZohoSalesOrder[]> {
-    const key = `zoho:orders:${fromDate}:${toDate}`;
     const orders = await this.zoho._fetchListFromZoho(fromDate, toDate);
-    await this.cache.set(key, orders);
+    await this.zoho._populateCacheFromList(orders);
     return orders;
   }
 

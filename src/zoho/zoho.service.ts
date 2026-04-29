@@ -27,6 +27,86 @@ export interface ZohoSalesOrder {
   cached_at?: number; // timestamp when this record was cached, used for cache staleness checks
 }
 
+/**
+ * All fields accepted by the Zoho PUT /salesorders/:id endpoint.
+ * Every field is optional — send only what you want to change.
+ */
+export interface ZohoLineItemUpdate {
+  line_item_id?: string;
+  item_id?: string;
+  name?: string;
+  description?: string;
+  rate?: number;
+  quantity?: number;
+  unit?: string;
+  tax_id?: string;
+  item_total?: number;
+  location_id?: string;
+  hsn_or_sac?: number;
+}
+
+export interface ZohoCreatePayload {
+  customer_id: number | string;       // required
+  line_items: ZohoLineItemUpdate[];   // required
+  salesorder_number?: string;
+  date?: string;
+  shipment_date?: string;
+  reference_number?: string;
+  discount?: string;
+  is_discount_before_tax?: boolean;
+  discount_type?: string;
+  delivery_method?: string;
+  shipping_charge?: number;
+  adjustment?: number;
+  adjustment_description?: string;
+  pricebook_id?: string | number;
+  notes?: string;
+  salesperson_name?: string;
+  terms?: string;
+  exchange_rate?: number;
+  location_id?: string;
+  place_of_supply?: string;
+  gst_treatment?: string;
+  gst_no?: string;
+  custom_fields?: Array<{
+    custom_field_id: string;
+    index?: number;
+    label?: string;
+    value: string;
+  }>;
+}
+
+export interface ZohoUpdatePayload {
+  salesorder_number?: string;
+  date?: string;
+  shipment_date?: string;
+  reference_number?: string;
+  customer_id?: number | string;
+  discount?: string;
+  is_discount_before_tax?: boolean;
+  discount_type?: string;
+  delivery_method?: string;
+  shipping_charge?: number;
+  adjustment?: number;
+  adjustment_description?: string;
+  pricebook_id?: string | number;
+  notes?: string;
+  salesperson_name?: string;
+  terms?: string;
+  exchange_rate?: number;
+  line_items?: ZohoLineItemUpdate[];
+  location_id?: string;
+  place_of_supply?: string;
+  gst_treatment?: string;
+  gst_no?: string;
+  custom_fields?: Array<{
+    custom_field_id: string;
+    index?: number;
+    label?: string;
+    value: string;
+  }>;
+}
+
 export interface ZohoListResponse {
   orders: ZohoSalesOrder[];
   totalCount: number;
@@ -41,7 +121,7 @@ export class ZohoService {
   constructor(
     private authService: AuthService,
     private configService: ConfigService,
-    private readonly cache: CacheService
+    private readonly cache: CacheService,
   ) {
     this.orgId = this.configService.get<string>('ZOHO_ORGANIZATION_ID')!;
   }
@@ -60,19 +140,81 @@ export class ZohoService {
     });
   }
 
+  // ─── index helpers ────────────────────────────────────────────────────────────
+
+  private dayIndexKey(date: string) {
+    return `zoho:orders:index:${date}`;
+  }
+
+  /** All calendar dates (YYYY-MM-DD) in [fromDate, toDate] inclusive */
+  private datesInRange(fromDate: string, toDate: string): string[] {
+    const dates: string[] = [];
+    const cur = new Date(fromDate);
+    const end = new Date(toDate);
+    while (cur <= end) {
+      dates.push(cur.toISOString().slice(0, 10));
+      cur.setDate(cur.getDate() + 1);
+    }
+    return dates;
+  }
+
+  private async getIndexForDate(date: string): Promise<string[]> {
+    return (await this.cache.get<string[]>(this.dayIndexKey(date))) ?? [];
+  }
+
+  private async addToDateIndex(date: string, orderId: string): Promise<void> {
+    const ids = await this.getIndexForDate(date);
+    if (!ids.includes(orderId)) {
+      await this.cache.set(this.dayIndexKey(date), [...ids, orderId]);
+    }
+  }
+
+  async _populateCacheFromList(orders: ZohoSalesOrder[]): Promise<void> {
+    // Group IDs by date
+    const byDate = new Map<string, string[]>();
+    for (const o of orders) {
+      const day = o.date.slice(0, 10); // assumes ISO date
+      if (!byDate.has(day)) byDate.set(day, []);
+      byDate.get(day)!.push(o.salesorder_id);
+    }
+
+    await Promise.all([
+      // Persist day indexes
+      ...[...byDate.entries()].map(([date, ids]) =>
+        this.cache.set(this.dayIndexKey(date), ids)
+      ),
+      // Persist individual orders (list endpoint doesn't have line_items,
+      // so only cache if not already cached with richer detail data)
+      ...orders.map(async o => {
+        const key = `zoho:order:${o.salesorder_id}`;
+        const existing = await this.cache.get<CachedEntry<ZohoSalesOrder>>(key);
+        if (!existing) {
+          await this.cache.set(key, { data: o, cachedAt: Date.now() } satisfies CachedEntry<ZohoSalesOrder>);
+        }
+      }),
+    ]);
+  }
+
   // fetches ALL sales orders for a date range (list endpoint, no line items)
   async listSalesOrders(fromDate: string, toDate: string): Promise<ZohoSalesOrder[]> {
-    const key = `zoho:orders:${fromDate}:${toDate}`;
+    const dates = this.datesInRange(fromDate, toDate);
 
-    const cached = await this.cache.get<ZohoSalesOrder[]>(key);
-    if (cached) {
-      this.logger.debug(`Cache HIT  [range] ${key}`);
-      return cached;
+    // Check whether every day in the range has a populated index
+    const indices = await Promise.all(dates.map(d => this.getIndexForDate(d)));
+    const allDaysCached = indices.every(ids => ids.length > 0);
+    // ⚠️  "length > 0" is a heuristic — a day with genuinely zero orders will
+    //     always miss. You can store a sentinel value like ["__empty__"] for
+    //     those days if it becomes a problem.
+
+    if (allDaysCached) {
+      this.logger.debug(`Cache HIT  [range] ${fromDate}→${toDate}`);
+      const allIds = [...new Set(indices.flat())];
+      return this.getSalesOrderDetails(allIds); // uses per-ID cache
     }
-    this.logger.debug(`Cache MISS [range] ${key}`);
 
+    this.logger.debug(`Cache MISS [range] ${fromDate}→${toDate}`);
     const orders = await this._fetchListFromZoho(fromDate, toDate);
-    await this.cache.set(key, orders);
+    await this._populateCacheFromList(orders);
     return orders;
   }
 
@@ -112,12 +254,22 @@ export class ZohoService {
 
   // fetches full details (including line items) for a single SO
   async getSalesOrderDetail(salesOrderId: string): Promise<ZohoSalesOrder> {
-    this.logger.log(`🔍 Fetching Zoho SO detail for ${salesOrderId}`);
-    const client = await this.getClient();
+    const cacheKey = `zoho:order:${salesOrderId}`;
 
+    const cached = await this.cache.get<CachedEntry<ZohoSalesOrder>>(cacheKey);
+    if (cached) {
+      this.logger.debug(`Cache HIT  [detail] ${cacheKey}`);
+      return { ...cached.data, cached_at: cached.cachedAt };
+    }
+    this.logger.debug(`Cache MISS [detail] ${cacheKey}`);
+
+    const client = await this.getClient();
     try {
       const response = await client.get(`/salesorders/${salesOrderId}`);
-      return response.data.salesorder;
+      const order = response.data.salesorder;
+
+      await this.cache.set(cacheKey, { data: order, cachedAt: Date.now() } satisfies CachedEntry<ZohoSalesOrder>);
+      return order;
     } catch (err) {
       this.handleZohoError(err);
     }
@@ -190,6 +342,59 @@ export class ZohoService {
     return results;
   }
 
+  //WRITING TO DB
+
+  async createSalesOrder(payload: Partial<ZohoCreatePayload>): Promise<ZohoSalesOrder> {
+    this.logger.log(`✏️  Creating Zoho SO`);
+    const client = await this.getClient();
+
+    let created: ZohoSalesOrder;
+    try {
+      const response = await client.post(`/salesorders`, payload);
+      created = response.data.salesorder;
+    } catch (err) {
+      this.handleZohoError(err);
+    }
+
+    await this._upsertOrderInCache(created);
+    this.logger.log(`✅ SO ${created.salesorder_id} created and cached`);
+    return created;
+  }
+
+  async updateSalesOrder(
+    salesOrderId: string,
+    payload: Partial<ZohoUpdatePayload>,
+  ): Promise<ZohoSalesOrder> {
+    this.logger.log(`✏️  Updating Zoho SO ${salesOrderId}`);
+    const client = await this.getClient();
+
+    let updated: ZohoSalesOrder;
+    try {
+      const response = await client.put(`/salesorders/${salesOrderId}`, payload);
+      updated = response.data.salesorder;
+    } catch (err) {
+      this.handleZohoError(err);
+    }
+
+    await this._upsertOrderInCache(updated);
+    this.logger.log(`✅ SO ${salesOrderId} updated and cache refreshed`);
+    return updated;
+  }
+
+  private async _upsertOrderInCache(order: ZohoSalesOrder): Promise<void> {
+    const day = order.date.slice(0, 10);
+    await Promise.all([
+      this.cache.set(`zoho:order:${order.salesorder_id}`, {
+        data: order,
+        cachedAt: Date.now(),
+      } satisfies CachedEntry<ZohoSalesOrder>),
+      this.addToDateIndex(day, order.salesorder_id),
+    ]);
+  }
+
+
+  // ERROR HANDLING
+
   private handleZohoError(err: any): never {
     const status = err?.response?.status;
     const message = err?.response?.data?.message || err.message;
@@ -216,4 +421,6 @@ export class ZohoService {
       message: `Zoho API error: ${message}`,
     };
   }
+
+
 }

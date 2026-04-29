@@ -1,40 +1,18 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { DatabaseService, DbSale } from '../database/database.service';
+import { Injectable, Logger, BadRequestException } from '@nestjs/common';
+import { DatabaseService } from '../database/database.service';
 import { ZohoService, ZohoSalesOrder } from '../zoho/zoho.service';
+import { SalesService } from '../sales/sales.service';
 
-// ---------- result types ----------
-export type DayStatus =
-  | 'CLEAN'
-  | 'COUNT_MISMATCH'
-  | 'PRICE_MISMATCH'
-  | 'ITEM_MISMATCH'
-  | 'RATE_LIMIT_EXCEEDED'
-  | 'ERROR';
-
-export interface LineItemDiscrepancy {
-  dimension: string;
-  db_quantity: number;
-  zoho_quantity: number;
-  db_unit_sp: number;
-  zoho_rate: number;
-  db_line_sp: number;
-  zoho_item_total: number;
-}
-
-export interface MatchedPairResult {
-  db_sale_id: number;
-  zoho_salesorder_id: string;
-  signature: string;
-  total_db: number;
-  total_zoho: number;
-  total_match: boolean;
-  discrepancies: LineItemDiscrepancy[];
-}
+// ---------- types ----------
 
 export interface DbRecordSummary {
   db_sale_id: number;
   invoice_no: string;
   customer_name: string;
+
+  customer_id: number;        // DB FK
+  zoho_customer_id: string;   // customers.zoho_id
+
   line_items: { name: string; quantity: number; unit_sp: number; line_total: number }[];
   total_sp: number;
 }
@@ -48,79 +26,68 @@ export interface ZohoRecordSummary {
   cached_at?: number;
 }
 
-export interface BillingSummary {
-  total_db_amount: number;        // sum of all db total_sp * 1.18
-  total_zoho_amount: number;      // sum of all zoho totals
-  difference: number;             // zoho - db (positive = lost, negative = saved)
-}
-
 export interface DayResult {
   date: string;
-  status: DayStatus;
-  db_count?: number;
-  zoho_count?: number;
-  db_records?: DbRecordSummary[];
-  zoho_records?: ZohoRecordSummary[];
-  matched_pairs?: MatchedPairResult[];
-  unmatched_db?: number[];
-  unmatched_zoho?: string[];
-  billing_summary?: BillingSummary;
-  error?: string;
+  db_records: DbRecordSummary[];
+  zoho_records: ZohoRecordSummary[];
 }
 
 export interface ReconciliationReport {
   from: string;
   to: string;
   generated_at: string;
-  summary: {
-    total_days: number;
-    clean_days: number;
-    days_with_issues: number;
-  };
   days: DayResult[];
-  billing_summary: BillingSummary;
 }
 
-function computeBillingSummary(dbSales: DbSale[], zohoOrders: ZohoSalesOrder[]): BillingSummary {
-  const total_db_amount = Math.round(
-    dbSales.reduce((sum, s) => sum + s.total_sp * 1.18, 0) * 100
-  ) / 100;
+export interface CommitDbRecord {
+  id: number; // required — no ID = rejected
+  customer_id: number;
+  sale_date: string;
+  items: { dimension: string; quantity: number }[];
+}
 
-  const total_zoho_amount = Math.round(
-    zohoOrders.reduce((sum, o) => sum + Number(o.total), 0) * 100
-  ) / 100;
+export interface CommitZohoRecord {
+  zoho_salesorder_id?: string; // present = update, absent = create
+  customer_id: number | string;
+  date: string;
+  line_items: {
+    line_item_id?: string;
+    item_id?: string;
+    name: string;
+    quantity: number;
+    rate: number;
+  }[];
+}
 
-  return {
-    total_db_amount,
-    total_zoho_amount,
-    difference: Math.round((total_zoho_amount - total_db_amount) * 100) / 100,
+export interface CommitPayload {
+  date: string;
+  db_records: CommitDbRecord[];
+  zoho_records: CommitZohoRecord[];
+}
+
+export interface CommitResult {
+  date: string;
+  db: {
+    updated: number[];   // sale ids successfully updated
+    failed: { id: number; error: string }[];
+  };
+  zoho: {
+    updated: string[];   // zoho salesorder ids successfully updated
+    created: string[];   // zoho salesorder ids successfully created
+    failed: { record: CommitZohoRecord; error: string }[];
   };
 }
 
 // ---------- helpers ----------
 
-const normalize = (s: string) => s.toLowerCase().trim();
-
-function buildDbSignature(sale: DbSale): string {
-  return sale.items
-    .map(i => `${normalize(i.dimension)}:${i.quantity}`)
-    .sort()
-    .join('|');
-}
-
-function buildZohoSignature(order: ZohoSalesOrder): string {
-  return (order.line_items ?? [])
-    .map(i => `${normalize(i.name)}:${i.quantity}`)
-    .sort()
-    .join('|');
-}
-
-function dbToSummary(s: DbSale): DbRecordSummary {
+function dbToSummary(s: any): DbRecordSummary {
   return {
     db_sale_id: s.id,
     invoice_no: s.invoice_no,
     customer_name: s.customer_name,
-    line_items: s.items.map(i => ({
+    customer_id: s.customer_id,
+    zoho_customer_id: s.zoho_customer_id,
+    line_items: s.items.map((i: any) => ({
       name: i.dimension,
       quantity: i.quantity,
       unit_sp: i.unit_sp,
@@ -146,51 +113,6 @@ function zohoToSummary(o: ZohoSalesOrder): ZohoRecordSummary {
   };
 }
 
-function compareLineItems(dbSale: DbSale, zohoOrder: ZohoSalesOrder): LineItemDiscrepancy[] {
-  const discrepancies: LineItemDiscrepancy[] = [];
-
-  const zohoItemMap = new Map<string, { quantity: number; rate: number; item_total: number }>();
-  for (const item of zohoOrder.line_items ?? []) {
-    zohoItemMap.set(normalize(item.name), {
-      quantity: Number(item.quantity),
-      rate: Number(item.rate),
-      item_total: Number(item.item_total),
-    });
-  }
-
-  for (const dbItem of dbSale.items) {
-    const key = normalize(dbItem.dimension);
-    const zohoItem = zohoItemMap.get(key);
-
-    if (!zohoItem) {
-      discrepancies.push({
-        dimension: dbItem.dimension,
-        db_quantity: dbItem.quantity,
-        zoho_quantity: 0,
-        db_unit_sp: dbItem.unit_sp,
-        zoho_rate: 0,
-        db_line_sp: dbItem.line_sp,
-        zoho_item_total: 0,
-      });
-      continue;
-    }
-
-    if (dbItem.quantity !== zohoItem.quantity || dbItem.unit_sp !== zohoItem.rate) {
-      discrepancies.push({
-        dimension: dbItem.dimension,
-        db_quantity: dbItem.quantity,
-        zoho_quantity: zohoItem.quantity,
-        db_unit_sp: dbItem.unit_sp,
-        zoho_rate: zohoItem.rate,
-        db_line_sp: dbItem.line_sp,
-        zoho_item_total: zohoItem.item_total,
-      });
-    }
-  }
-
-  return discrepancies;
-}
-
 // ---------- service ----------
 
 @Injectable()
@@ -200,169 +122,124 @@ export class ReconciliationService {
   constructor(
     private databaseService: DatabaseService,
     private zohoService: ZohoService,
+    private salesService: SalesService,
   ) { }
 
   async reconcile(fromDate: string, toDate: string): Promise<ReconciliationReport> {
-    this.logger.log(`🔁 Starting reconciliation from ${fromDate} to ${toDate}`);
+    this.logger.log(`📦 Fetching records from ${fromDate} to ${toDate}`);
 
-
-    //bulk fetch zoho (gets all records between from and to date, could go to 1000-2000 records)
     const [dbSales, zohoOrders] = await Promise.all([
       this.databaseService.getSalesWithItems(fromDate, toDate),
       this.zohoService.listSalesOrders(fromDate, toDate),
     ]);
 
+
+    const hydratedZohoOrders = await Promise.all(
+      zohoOrders.map(async (order) => {
+        if (order.line_items && order.line_items.length > 0) return order; // already has items (e.g. from cache)
+        try {
+          const detail = await this.zohoService.getSalesOrderDetail(order.salesorder_id);
+          return { ...order, line_items: detail.line_items };
+        } catch (err: any) {
+          this.logger.warn(`⚠️ Could not hydrate line items for ${order.salesorder_id}: ${err?.message}`);
+          return order; // fall back to empty, don't crash the whole report
+        }
+      })
+    );
+
     const dbByDate = this.groupByDate(dbSales, s => s.sale_date);
-    const zohoByDate = this.groupByDate(zohoOrders, o => o.date);
+    const zohoByDate = this.groupByDate(hydratedZohoOrders, o => o.date);
+
 
     const allDates = Array.from(
       new Set([...Object.keys(dbByDate), ...Object.keys(zohoByDate)]),
     ).sort();
 
-    const dayResults: DayResult[] = [];
-
-    for (const date of allDates) {
-      const result = await this.reconcileDay(
-        date,
-        dbByDate[date] ?? [],
-        zohoByDate[date] ?? [],
-      );
-      dayResults.push(result);
-
-      if (result.status === 'RATE_LIMIT_EXCEEDED') {
-        this.logger.warn('⚠️  Rate limit hit, stopping reconciliation early');
-        break;
-      }
-    }
-
-    const cleanDays = dayResults.filter(d => d.status === 'CLEAN').length;
-
-    const globalBilling: BillingSummary = {
-      total_db_amount: Math.round(
-        dayResults.reduce((sum, d) => sum + (d.billing_summary?.total_db_amount ?? 0), 0) * 100
-      ) / 100,
-      total_zoho_amount: Math.round(
-        dayResults.reduce((sum, d) => sum + (d.billing_summary?.total_zoho_amount ?? 0), 0) * 100
-      ) / 100,
-      difference: Math.round(
-        dayResults.reduce((sum, d) => sum + (d.billing_summary?.difference ?? 0), 0) * 100
-      ) / 100,
-    };
-
+    const days: DayResult[] = allDates.map(date => ({
+      date,
+      db_records: (dbByDate[date] ?? []).map(dbToSummary),
+      zoho_records: (zohoByDate[date] ?? []).map(zohoToSummary),
+    }));
 
     return {
       from: fromDate,
       to: toDate,
       generated_at: new Date().toISOString(),
-      summary: {
-        total_days: dayResults.length,
-        clean_days: cleanDays,
-        days_with_issues: dayResults.length - cleanDays,
-      },
-      days: dayResults,
-      billing_summary: globalBilling,
+      days,
     };
   }
 
-  private async reconcileDay(
-    date: string,
-    dbSales: DbSale[],
-    zohoOrders: ZohoSalesOrder[],
-  ): Promise<DayResult> {
-    this.logger.log(`📅 Reconciling ${date} — DB: ${dbSales.length}, Zoho: ${zohoOrders.length}`);
+  async commit(payload: CommitPayload): Promise<CommitResult> {
+    this.logger.log(`💾 Committing reconciled records for ${payload.date}`);
 
-    // Fetch Zoho line-item details once — needed for both COUNT_MISMATCH and deep compare
-    let zohoDetails: ZohoSalesOrder[];
-    try {
-      zohoDetails = await this.zohoService.getSalesOrderDetails(
-        zohoOrders.map(o => o.salesorder_id),
+    // reject any DB records without an ID
+    const missingIds = payload.db_records.filter(r => !r.id);
+    if (missingIds.length > 0) {
+      throw new BadRequestException(
+        'All DB records must have an ID. New DB records must be created through the sales flow.',
       );
-    } catch (err: any) {
-      if (err?.type === 'RATE_LIMIT_EXCEEDED') {
-        return { date, status: 'RATE_LIMIT_EXCEEDED', error: err.message };
-      }
-      return { date, status: 'ERROR', error: err?.message ?? 'Failed to fetch Zoho details' };
     }
 
-    // COUNT MISMATCH — return early with summaries on both sides
-    if (dbSales.length !== zohoOrders.length) {
-      return {
-        date,
-        status: 'COUNT_MISMATCH',
-        db_count: dbSales.length,
-        zoho_count: zohoOrders.length,
-        db_records: dbSales.map(dbToSummary),
-        zoho_records: zohoDetails.map(zohoToSummary),
-        billing_summary: computeBillingSummary(dbSales, zohoDetails),
-      };
-    }
-
-    // DEEP COMPARE — counts match, check line items and totals
-    return this.deepCompare(date, dbSales, zohoDetails);
-  }
-
-  private deepCompare(
-    date: string,
-    dbSales: DbSale[],
-    zohoOrders: ZohoSalesOrder[],
-  ): DayResult {
-    const zohoSignatureMap = new Map<string, ZohoSalesOrder>();
-    for (const order of zohoOrders) {
-      zohoSignatureMap.set(buildZohoSignature(order), order);
-    }
-
-    const matchedPairs: MatchedPairResult[] = [];
-    const unmatchedDb: number[] = [];
-    const unmatchedZoho = new Set(zohoOrders.map(o => o.salesorder_id));
-
-    for (const dbSale of dbSales) {
-      const sig = buildDbSignature(dbSale);
-      const zohoMatch = zohoSignatureMap.get(sig);
-
-      if (!zohoMatch) {
-        unmatchedDb.push(dbSale.id);
-        continue;
-      }
-
-      unmatchedZoho.delete(zohoMatch.salesorder_id);
-
-      const discrepancies = compareLineItems(dbSale, zohoMatch);
-      const totalDbWithGst = Math.round(dbSale.total_sp * 1.18 * 100) / 100;
-      const totalMatch = totalDbWithGst === Number(zohoMatch.total);
-
-      matchedPairs.push({
-        db_sale_id: dbSale.id,
-        zoho_salesorder_id: zohoMatch.salesorder_id,
-        signature: sig,
-        total_db: dbSale.total_sp,
-        total_zoho: Number(zohoMatch.total),
-        total_match: totalMatch,
-        discrepancies,
-      });
-    }
-
-    const hasUnmatched = unmatchedDb.length > 0 || unmatchedZoho.size > 0;
-    const hasItemMismatch = matchedPairs.some(p => p.discrepancies.length > 0);
-    const hasPriceMismatch = matchedPairs.some(p => !p.total_match);
-
-    const status: DayStatus = hasUnmatched
-      ? 'ITEM_MISMATCH'
-      : hasItemMismatch || hasPriceMismatch
-        ? 'PRICE_MISMATCH'
-        : 'CLEAN';
-
-    return {
-      date,
-      status,
-      db_count: dbSales.length,
-      zoho_count: zohoOrders.length,
-      matched_pairs: matchedPairs,
-      unmatched_db: unmatchedDb,
-      unmatched_zoho: Array.from(unmatchedZoho),
-      db_records: dbSales.map(dbToSummary),
-      zoho_records: zohoOrders.map(zohoToSummary),
-      billing_summary: computeBillingSummary(dbSales, zohoOrders),
+    const result: CommitResult = {
+      date: payload.date,
+      db: { updated: [], failed: [] },
+      zoho: { updated: [], created: [], failed: [] },
     };
+
+    // --- DB: update only ---
+    for (const record of payload.db_records) {
+      try {
+        await this.salesService.updateSale(record.id, {
+          customer_id: record.customer_id,
+          sale_date: record.sale_date,
+          items: record.items,
+        });
+        result.db.updated.push(record.id);
+        this.logger.log(`✅ DB sale ${record.id} updated`);
+      } catch (err: any) {
+        this.logger.error(`❌ Failed to update DB sale ${record.id}: ${err?.message}`);
+        result.db.failed.push({ id: record.id, error: err?.message ?? 'Unknown error' });
+      }
+    }
+
+
+    // --- Zoho: update or create ---
+    for (const record of payload.zoho_records) {
+
+      this.logger.error(
+        `DEBUG Zoho create payload: customer_id=${record.customer_id}, type=${typeof record.customer_id}`
+      );
+
+      try {
+        if (record.zoho_salesorder_id) {
+          // update
+          await this.zohoService.updateSalesOrder(record.zoho_salesorder_id, {
+            date: record.date,
+            customer_id: record.customer_id,
+            line_items: record.line_items,
+          });
+          result.zoho.updated.push(record.zoho_salesorder_id);
+          this.logger.log(`✅ Zoho SO ${record.zoho_salesorder_id} updated`);
+        } else {
+          // create
+
+
+
+          const created = await this.zohoService.createSalesOrder({
+            customer_id: record.customer_id,
+            date: record.date,
+            line_items: record.line_items,
+          });
+          result.zoho.created.push(created.salesorder_id);
+          this.logger.log(`✅ Zoho SO ${created.salesorder_id} created`);
+        }
+      } catch (err: any) {
+        this.logger.error(`❌ Failed to process Zoho record: ${err?.message}`);
+        result.zoho.failed.push({ record, error: err?.message ?? 'Unknown error' });
+      }
+    }
+
+    return result;
   }
 
   private groupByDate<T>(items: T[], getDate: (item: T) => string): Record<string, T[]> {

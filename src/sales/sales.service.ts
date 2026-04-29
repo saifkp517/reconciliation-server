@@ -158,7 +158,6 @@ export class SalesService {
       // step 4 — assign trucks if provided
       if (dto.trucks?.length) {
         for (const truckDto of dto.trucks) {
-          console.log(truckDto)
           // validate truck exists and is active
           const truck = await manager.findOne(Truck, {
             where: { id: truckDto.truck_id, is_active: false },

@@ -1,5 +1,5 @@
-import { Controller, Get, Query, BadRequestException } from '@nestjs/common';
-import { ReconciliationService } from './reconciliation.service';
+import { Controller, Get, Post, Query, Body, BadRequestException } from '@nestjs/common';
+import { ReconciliationService, type CommitPayload } from './reconciliation.service';
 
 @Controller('reconciliation')
 export class ReconciliationController {
@@ -24,5 +24,23 @@ export class ReconciliationController {
     }
 
     return this.reconciliationService.reconcile(from, to);
+  }
+
+  @Post('commit')
+  async commit(@Body() payload: CommitPayload) {
+    if (!payload.date) {
+      throw new BadRequestException('date is required in commit payload');
+    }
+
+    const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+    if (!dateRegex.test(payload.date)) {
+      throw new BadRequestException('date must be in YYYY-MM-DD format');
+    }
+
+    if (!Array.isArray(payload.db_records) || !Array.isArray(payload.zoho_records)) {
+      throw new BadRequestException('db_records and zoho_records must be arrays');
+    }
+
+    return this.reconciliationService.commit(payload);
   }
 }

@@ -8,6 +8,8 @@ export interface DbSale {
   invoice_no: string;
   sale_date: string;
   customer_name: string;
+  customer_id: number;
+  zoho_customer_id: string;
   items: { dimension: string; quantity: number; unit_sp: number; line_sp: number }[];
   total_sp: number;
   total_cp: number;
@@ -55,6 +57,8 @@ export class DatabaseService {
       s.sale_date     AS "sale_date",
       s.invoice_no    AS "invoice_no",
       c.name          AS "customer_name",
+      c.zoho_id       AS "zoho_customer_id",   -- ADD THIS
+      s.customer_id   AS "customer_id",        -- ADD THIS (optional but useful)
       s.total_sp      AS "total_sp",
       s.total_cp      AS "total_cp",
       s.profit        AS "profit",
@@ -79,6 +83,8 @@ export class DatabaseService {
           sale_date: row.sale_date,
           invoice_no: row.invoice_no,
           customer_name: row.customer_name,
+          customer_id: Number(row.customer_id),          // ADD
+          zoho_customer_id: row.zoho_customer_id,
           total_sp: Number(row.total_sp),
           total_cp: Number(row.total_cp),
           profit: Number(row.profit),
