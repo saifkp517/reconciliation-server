@@ -15,18 +15,6 @@ export class SaleItem {
   @Column({ type: 'int' })
   quantity!: number;
 
-  @Column({ type: 'numeric', nullable: true })
-  unit_sp!: number;
-
-  @Column({ type: 'numeric', nullable: true })
-  unit_cp!: number;
-
-  @Column({ type: 'numeric', nullable: true })
-  line_sp!: number;
-
-  @Column({ type: 'numeric', nullable: true })
-  line_cp!: number;
-
   @Column({ type: 'text', nullable: true })
   zoho_item_id!: string;
 

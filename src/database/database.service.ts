@@ -10,19 +10,13 @@ export interface DbSale {
   customer_name: string;
   customer_id: number;
   zoho_customer_id: string;
-  items: { dimension: string; quantity: number; unit_sp: number; line_sp: number }[];
-  total_sp: number;
-  total_cp: number;
-  profit: number;
-  profit_pct: number;
+  items: { dimension: string; quantity: number; }[];
 }
 
 export interface DbSaleItem {
   id: number;
   dimension: string;
   quantity: number;
-  unit_sp: number;
-  line_sp: number;
 }
 
 @Injectable()
@@ -59,14 +53,8 @@ export class DatabaseService {
       c.name          AS "customer_name",
       c.zoho_id       AS "zoho_customer_id",   -- ADD THIS
       s.customer_id   AS "customer_id",        -- ADD THIS (optional but useful)
-      s.total_sp      AS "total_sp",
-      s.total_cp      AS "total_cp",
-      s.profit        AS "profit",
-      s.profit_pct    AS "profit_pct",
       si.dimension    AS "dimension",
-      si.quantity     AS "quantity",
-      si.unit_sp      AS "unit_sp",
-      si.line_sp      AS "line_sp"
+      si.quantity     AS "quantity"
     FROM sales s
     JOIN customers c   ON c.id = s.customer_id
     JOIN sale_items si ON si.sale_id = s.id
@@ -85,18 +73,12 @@ export class DatabaseService {
           customer_name: row.customer_name,
           customer_id: Number(row.customer_id),          // ADD
           zoho_customer_id: row.zoho_customer_id,
-          total_sp: Number(row.total_sp),
-          total_cp: Number(row.total_cp),
-          profit: Number(row.profit),
-          profit_pct: Number(row.profit_pct),
           items: [],
         });
       }
       saleMap.get(row.id)!.items.push({
         dimension: row.dimension,
         quantity: Number(row.quantity),
-        unit_sp: Number(row.unit_sp ?? 0),
-        line_sp: Number(row.line_sp ?? 0),
       });
     }
 

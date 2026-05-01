@@ -12,7 +12,7 @@ export class AuthService {
   private readonly logger = new Logger(AuthService.name);
   private tokenData: TokenData | null = null;
 
-  constructor(private configService: ConfigService) {}
+  constructor(private configService: ConfigService) { }
 
   async getValidAccessToken(): Promise<string> {
     // if we have a token and it's not expired (with 60s buffer), return it
@@ -44,7 +44,8 @@ export class AuthService {
         },
       );
 
-      const { access_token, expires_in } = response.data;
+      const { access_token, expires_in, scope } = response.data;
+      this.logger.log(`✅ Token scopes: ${scope}`);
 
       this.tokenData = {
         accessToken: access_token,

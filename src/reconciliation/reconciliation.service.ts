@@ -1,28 +1,29 @@
 import { Injectable, Logger, BadRequestException } from '@nestjs/common';
 import { DatabaseService } from '../database/database.service';
-import { ZohoService, ZohoSalesOrder } from '../zoho/zoho.service';
+import { ZohoService, ZohoQuote } from '../zoho/zoho.service';
 import { SalesService } from '../sales/sales.service';
 
 // ---------- types ----------
+
+const VALID_DIMENSIONS = ["BLOCK 4 inches", "BLOCK 6 inches", "BLOCK 8 inches"];
 
 export interface DbRecordSummary {
   db_sale_id: number;
   invoice_no: string;
   customer_name: string;
-
-  customer_id: number;        // DB FK
-  zoho_customer_id: string;   // customers.zoho_id
-
-  line_items: { name: string; quantity: number; unit_sp: number; line_total: number }[];
-  total_sp: number;
+  customer_id: number;
+  zoho_customer_id: string;
+  line_items: { name: string; quantity: number }[];
+  dimension_totals: Record<string, number>;
 }
 
+
 export interface ZohoRecordSummary {
-  zoho_salesorder_id: string;
-  so_number: string;
+  zoho_estimate_id: string;
+  estimate_number: string;
   customer_name: string;
-  line_items: { name: string; quantity: number; unit_sp: number; line_total: number }[];
-  total: number;
+  line_items: { name: string; quantity: number; }[];
+  dimension_totals: Record<string, number>;
   cached_at?: number;
 }
 
@@ -46,70 +47,61 @@ export interface CommitDbRecord {
   items: { dimension: string; quantity: number }[];
 }
 
-export interface CommitZohoRecord {
-  zoho_salesorder_id?: string; // present = update, absent = create
-  customer_id: number | string;
-  date: string;
-  line_items: {
-    line_item_id?: string;
-    item_id?: string;
-    name: string;
-    quantity: number;
-    rate: number;
-  }[];
-}
-
-export interface CommitPayload {
-  date: string;
-  db_records: CommitDbRecord[];
-  zoho_records: CommitZohoRecord[];
-}
-
-export interface CommitResult {
-  date: string;
-  db: {
-    updated: number[];   // sale ids successfully updated
-    failed: { id: number; error: string }[];
-  };
-  zoho: {
-    updated: string[];   // zoho salesorder ids successfully updated
-    created: string[];   // zoho salesorder ids successfully created
-    failed: { record: CommitZohoRecord; error: string }[];
-  };
-}
-
 // ---------- helpers ----------
 
 function dbToSummary(s: any): DbRecordSummary {
+  const line_items = s.items.map((i: any) => ({
+    name: i.dimension,
+    quantity: i.quantity,
+  }));
+
+  const dimension_totals = VALID_DIMENSIONS.reduce((acc, dim) => {
+    acc[dim] = 0;
+    return acc;
+  }, {} as Record<string, number>);
+
+  line_items.forEach(i => {
+    if (dimension_totals[i.name] !== undefined) {
+      dimension_totals[i.name] += i.quantity;
+    }
+  });
+
   return {
     db_sale_id: s.id,
     invoice_no: s.invoice_no,
     customer_name: s.customer_name,
     customer_id: s.customer_id,
     zoho_customer_id: s.zoho_customer_id,
-    line_items: s.items.map((i: any) => ({
-      name: i.dimension,
-      quantity: i.quantity,
-      unit_sp: i.unit_sp,
-      line_total: i.line_sp,
-    })),
-    total_sp: s.total_sp,
+    line_items,
+    dimension_totals
   };
 }
 
-function zohoToSummary(o: ZohoSalesOrder): ZohoRecordSummary {
+function zohoToSummary(q: ZohoQuote): ZohoRecordSummary {
+  const line_items = (q.line_items ?? []).map(i => ({
+    name: i.name,
+    quantity: Number(i.quantity),
+    line_total: Number(i.item_total),
+  }));
+
+  const dimension_totals = VALID_DIMENSIONS.reduce((acc, dim) => {
+    acc[dim] = 0;
+    return acc;
+  }, {} as Record<string, number>);
+
+  line_items.forEach(i => {
+    if (dimension_totals[i.name] !== undefined) {
+      dimension_totals[i.name] += i.quantity;
+    }
+  });
+
   return {
-    zoho_salesorder_id: o.salesorder_id,
-    so_number: o.salesorder_number,
-    customer_name: o.customer_name,
-    line_items: (o.line_items ?? []).map(i => ({
-      name: i.name,
-      quantity: Number(i.quantity),
-      unit_sp: Number(i.rate),
-      line_total: Number(i.item_total),
-    })),
-    total: Number(o.total),
-    cached_at: o.cached_at,
+    zoho_estimate_id: q.estimate_id,
+    estimate_number: q.estimate_number,
+    customer_name: q.customer_name,
+    line_items,
+    dimension_totals,
+    cached_at: q.cached_at,
   };
 }
 
@@ -125,31 +117,30 @@ export class ReconciliationService {
     private salesService: SalesService,
   ) { }
 
-  async reconcile(fromDate: string, toDate: string): Promise<ReconciliationReport> {
+  async reconcileListing(fromDate: string, toDate: string): Promise<ReconciliationReport> {
     this.logger.log(`📦 Fetching records from ${fromDate} to ${toDate}`);
 
-    const [dbSales, zohoOrders] = await Promise.all([
+    const [dbSales, zohoQuotes] = await Promise.all([
       this.databaseService.getSalesWithItems(fromDate, toDate),
-      this.zohoService.listSalesOrders(fromDate, toDate),
+      this.zohoService.listQuotes(fromDate, toDate),
     ]);
 
 
-    const hydratedZohoOrders = await Promise.all(
-      zohoOrders.map(async (order) => {
-        if (order.line_items && order.line_items.length > 0) return order; // already has items (e.g. from cache)
+    const hydratedZohoQuotes = await Promise.all(
+      zohoQuotes.map(async (quote) => {
+        if (quote.line_items && quote.line_items.length > 0) return quote; // already has items (e.g. from cache)
         try {
-          const detail = await this.zohoService.getSalesOrderDetail(order.salesorder_id);
-          return { ...order, line_items: detail.line_items };
+          const detail = await this.zohoService.getQuoteDetail(quote.estimate_id);
+          return { ...quote, line_items: detail.line_items };
         } catch (err: any) {
-          this.logger.warn(`⚠️ Could not hydrate line items for ${order.salesorder_id}: ${err?.message}`);
-          return order; // fall back to empty, don't crash the whole report
+          this.logger.warn(`⚠️ Could not hydrate line items for ${quote.estimate_id}: ${err?.message}`);
+          return quote; // fall back to empty, don't crash the whole report
         }
       })
     );
 
     const dbByDate = this.groupByDate(dbSales, s => s.sale_date);
-    const zohoByDate = this.groupByDate(hydratedZohoOrders, o => o.date);
-
+    const zohoByDate = this.groupByDate(hydratedZohoQuotes, q => q.date);
 
     const allDates = Array.from(
       new Set([...Object.keys(dbByDate), ...Object.keys(zohoByDate)]),
@@ -169,8 +160,11 @@ export class ReconciliationService {
     };
   }
 
-  async commit(payload: CommitPayload): Promise<CommitResult> {
-    this.logger.log(`💾 Committing reconciled records for ${payload.date}`);
+  async commit(payload: { date: string; db_records: CommitDbRecord[] }): Promise<{
+    date: string;
+    db: { updated: number[]; failed: { id: number; error: string }[] };
+  }> {
+    this.logger.log(`💾 Committing reconciled DB records for ${payload.date}`);
 
     // reject any DB records without an ID
     const missingIds = payload.db_records.filter(r => !r.id);
@@ -180,13 +174,11 @@ export class ReconciliationService {
       );
     }
 
-    const result: CommitResult = {
+    const result = {
       date: payload.date,
-      db: { updated: [], failed: [] },
-      zoho: { updated: [], created: [], failed: [] },
+      db: { updated: [] as number[], failed: [] as { id: number; error: string }[] },
     };
 
-    // --- DB: update only ---
     for (const record of payload.db_records) {
       try {
         await this.salesService.updateSale(record.id, {
@@ -199,43 +191,6 @@ export class ReconciliationService {
       } catch (err: any) {
         this.logger.error(`❌ Failed to update DB sale ${record.id}: ${err?.message}`);
         result.db.failed.push({ id: record.id, error: err?.message ?? 'Unknown error' });
-      }
-    }
-
-
-    // --- Zoho: update or create ---
-    for (const record of payload.zoho_records) {
-
-      this.logger.error(
-        `DEBUG Zoho create payload: customer_id=${record.customer_id}, type=${typeof record.customer_id}`
-      );
-
-      try {
-        if (record.zoho_salesorder_id) {
-          // update
-          await this.zohoService.updateSalesOrder(record.zoho_salesorder_id, {
-            date: record.date,
-            customer_id: record.customer_id,
-            line_items: record.line_items,
-          });
-          result.zoho.updated.push(record.zoho_salesorder_id);
-          this.logger.log(`✅ Zoho SO ${record.zoho_salesorder_id} updated`);
-        } else {
-          // create
-
-
-
-          const created = await this.zohoService.createSalesOrder({
-            customer_id: record.customer_id,
-            date: record.date,
-            line_items: record.line_items,
-          });
-          result.zoho.created.push(created.salesorder_id);
-          this.logger.log(`✅ Zoho SO ${created.salesorder_id} created`);
-        }
-      } catch (err: any) {
-        this.logger.error(`❌ Failed to process Zoho record: ${err?.message}`);
-        result.zoho.failed.push({ record, error: err?.message ?? 'Unknown error' });
       }
     }
 

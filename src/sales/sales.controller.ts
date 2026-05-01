@@ -16,6 +16,11 @@ export class SalesController {
     return this.salesService.getCustomers();
   }
 
+  @Post('customer')
+  async createCustomer() {
+    return this.salesService
+  }
+
   @Get()
   getAllSales() {
     return this.salesService.getAllSales();

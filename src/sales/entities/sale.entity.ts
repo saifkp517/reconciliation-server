@@ -17,18 +17,6 @@ export class Sale {
   @Column({ type: 'date' })
   sale_date!: string;
 
-  @Column({ type: 'numeric', nullable: true })
-  total_sp!: number;
-
-  @Column({ type: 'numeric', nullable: true })
-  total_cp!: number;
-
-  @Column({ type: 'numeric', nullable: true })
-  profit!: number;
-
-  @Column({ type: 'numeric', nullable: true })
-  profit_pct!: number;
-
   @CreateDateColumn()
   created_at!: Date;
 

@@ -12,6 +12,12 @@ import { Truck } from '../trucks/entities/truck.entity';
 import { InventoryService } from '../inventory/inventory.service';
 
 
+interface CreateCustomerDto {
+  name?: string;
+  phone?: string;
+  zoho_id?: string;
+}
+
 export interface CreateSaleDto {
   customer_id: number;
   sale_date: string; // YYYY-MM-DD (recommended)
@@ -34,7 +40,11 @@ export interface CreateSaleTruckDto {
   items: CreateSaleTruckItemDto[];
 }
 
-
+const ITEM_CATALOG: Record<string, { item_id: string; rate: number; purchase_rate: number; name: string }> = {
+  'BLOCK 4 inches': { item_id: '3644122000000051003', rate: 29, purchase_rate: 20, name: 'BLOCK 4 inches' },
+  'BLOCK 6 inches': { item_id: '3644122000000051021', rate: 36, purchase_rate: 26, name: 'BLOCK 6 inches' },
+  'BLOCK 8 inches': { item_id: '3644122000000051039', rate: 44, purchase_rate: 32, name: 'BLOCK 8 inches' },
+};
 
 @Injectable()
 export class SalesService {
@@ -52,6 +62,29 @@ export class SalesService {
 
   async getCustomers() {
     return this.customerRepository.find();
+  }
+
+  async createCustomer(data: CreateCustomerDto): Promise<Customer> {
+    const { zoho_id, phone, name } = data;
+
+    // Prevent duplicate if zoho_id exists
+    if (zoho_id) {
+      const existing = await this.customerRepository.findOne({
+        where: { zoho_id },
+      });
+
+      if (existing) {
+        return existing; // idempotent behavior for webhook
+      }
+    }
+
+    const customer = this.customerRepository.create({
+      name,
+      phone,
+      zoho_id,
+    });
+
+    return await this.customerRepository.save(customer);
   }
 
   async getSaleById(id: number): Promise<Sale> {
@@ -74,23 +107,11 @@ export class SalesService {
     return sale;
   }
 
+
   async getItems(): Promise<any[]> {
-    const token = await this.authService.getValidAccessToken();
-
-    const response = await axios.get(
-      'https://www.zohoapis.in/inventory/v1/items',
-      {
-        headers: {
-          Authorization: `Zoho-oauthtoken ${token}`,
-        },
-        params: {
-          organization_id: process.env.ZOHO_ORGANIZATION_ID,
-        },
-      },
-    );
-
-    return response.data.items;
+    return Object.values(ITEM_CATALOG);
   }
+
 
   async getItemByDimension(dimension: string) {
     const items = await this.getItems();
@@ -145,15 +166,6 @@ export class SalesService {
       }
       const savedItems = await manager.save(SaleItem, saleItems);
 
-      // step 3 — compute and update totals
-      const total_sp = savedItems.reduce((sum, i) => sum + i.unit_sp * i.quantity, 0);
-      const total_cp = savedItems.reduce((sum, i) => sum + i.unit_cp * i.quantity, 0);
-      const profit = total_sp - total_cp;
-      const profit_pct = total_sp > 0
-        ? Math.round((profit / total_sp) * 100 * 100) / 100
-        : 0;
-
-      await manager.update(Sale, savedSale.id, { total_sp, total_cp, profit, profit_pct });
 
       // step 4 — assign trucks if provided
       if (dto.trucks?.length) {
@@ -370,15 +382,8 @@ export class SalesService {
         }
       }
 
-      // STEP 5 — recompute totals
-      const total_sp = newItems.reduce((sum, i) => sum + Number(i.line_sp), 0);
-      const total_cp = newItems.reduce((sum, i) => sum + Number(i.line_cp), 0);
-      const profit = total_sp - total_cp;
-      const profit_pct = total_sp > 0
-        ? Math.round((profit / total_sp) * 100 * 100) / 100
-        : 0;
 
-      await manager.update(Sale, id, { total_sp, total_cp, profit, profit_pct });
+
 
       return manager.findOne(Sale, {
         where: { id },
