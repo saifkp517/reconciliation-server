@@ -17,10 +17,15 @@ export class SalesController {
   }
 
   @Post('customer')
-  async createCustomer() {
-    return this.salesService
+  async createCustomer(@Body() body: any) {
+    return this.salesService.createCustomer({
+      name: body.name,
+      phone: body.phone,
+      zoho_id: body.zoho_id,
+    });
   }
 
+  
   @Get()
   getAllSales() {
     return this.salesService.getAllSales();
