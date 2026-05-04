@@ -29,7 +29,8 @@ export interface ZohoQuote {
 
 export interface ZohoListResponse {
   quotes: ZohoQuote[];
-  totalCount: number;
+  unavailableDates: string[];  // dates we couldn't fetch due to rate limit
+  partial: boolean;
 }
 
 @Injectable()
@@ -105,27 +106,88 @@ export class ZohoService {
     );
   }
 
+  private isSunday(date: string): boolean {
+    return new Date(date).getDay() === 0;
+  }
+
   // fetches ALL quotes for a date range (list endpoint, no line items)
-  async listQuotes(fromDate: string, toDate: string): Promise<ZohoQuote[]> {
+  async listQuotes(fromDate: string, toDate: string): Promise<ZohoListResponse> {
     const dates = this.datesInRange(fromDate, toDate);
+    const allQuotes: ZohoQuote[] = [];
+    const unavailableDates: string[] = [];
+    let rateLimitHit = false;
 
-    // Check whether every day in the range has a populated index
-    const indices = await Promise.all(dates.map(d => this.getIndexForDate(d)));
-    const allDaysCached = indices.every(ids => ids.length > 0);
-    // ⚠️  "length > 0" is a heuristic — a day with genuinely zero quotes will
-    //     always miss. You can store a sentinel value like ["__empty__"] for
-    //     those days if it becomes a problem.
+    for (const date of dates) {
+      if (this.isSunday(date)) continue;
 
-    if (allDaysCached) {
-      this.logger.debug(`Cache HIT  [range] ${fromDate}→${toDate}`);
-      const allIds = [...new Set(indices.flat())];
-      return this.getQuoteDetails(allIds); // uses per-ID cache
+      const ids = await this.getIndexForDate(date);
+
+      if (ids.length > 0) {
+        const cacheChecks = await Promise.all(
+          ids.map(id => this.cache.get<CachedEntry<ZohoQuote>>(`zoho:quote:${id}`))
+        );
+        const cached = cacheChecks
+          .filter(Boolean)
+          .map(entry => ({ ...entry!.data, cached_at: entry!.cachedAt }));
+
+        allQuotes.push(...cached);
+
+        const missingIds = ids.filter((_, i) => !cacheChecks[i]);
+
+        if (missingIds.length > 0 && !rateLimitHit) {
+          try {
+            const fetched = await this._fetchDetailsFromZoho(missingIds);
+            await Promise.all(
+              fetched.map(q =>
+                this.cache.set(`zoho:quote:${q.estimate_id}`, {
+                  data: q,
+                  cachedAt: Date.now(),
+                } satisfies CachedEntry<ZohoQuote>)
+              )
+            );
+            allQuotes.push(...fetched.map(q => ({ ...q, cached_at: Date.now() })));
+          } catch (err: any) {
+            if (err?.type === 'RATE_LIMIT_EXCEEDED') {
+              rateLimitHit = true;
+              unavailableDates.push(date);
+              this.logger.warn(`⚠️ Rate limit hit on detail fetch — stopping Zoho calls`);
+            } else {
+              throw err;
+            }
+          }
+        } else if (missingIds.length > 0 && rateLimitHit) {
+          unavailableDates.push(date);
+        }
+
+        continue;
+      }
+
+      // No index for this date
+      if (rateLimitHit) {
+        unavailableDates.push(date);
+        continue;
+      }
+
+      try {
+        const fetched = await this._fetchListFromZoho(date, date);
+        await this._populateCacheFromList(fetched);
+        allQuotes.push(...fetched);
+      } catch (err: any) {
+        if (err?.type === 'RATE_LIMIT_EXCEEDED') {
+          rateLimitHit = true;
+          unavailableDates.push(date);
+          this.logger.warn(`⚠️ Rate limit hit on list fetch — stopping Zoho calls`);
+        } else {
+          throw err;
+        }
+      }
     }
 
-    this.logger.debug(`Cache MISS [range] ${fromDate}→${toDate}`);
-    const quotes = await this._fetchListFromZoho(fromDate, toDate);
-    await this._populateCacheFromList(quotes);
-    return quotes;
+    return {
+      quotes: allQuotes,
+      unavailableDates,
+      partial: unavailableDates.length > 0,
+    };
   }
 
   async _fetchListFromZoho(fromDate: string, toDate: string): Promise<ZohoQuote[]> {
