@@ -37,6 +37,8 @@ export interface ReconciliationReport {
   from: string;
   to: string;
   generated_at: string;
+  partial: boolean;                // ← new
+  unavailableDates: string[];      // ← new
   days: DayResult[];
 }
 
@@ -120,21 +122,37 @@ export class ReconciliationService {
   async reconcileListing(fromDate: string, toDate: string): Promise<ReconciliationReport> {
     this.logger.log(`📦 Fetching records from ${fromDate} to ${toDate}`);
 
-    const [dbSales, zohoQuotes] = await Promise.all([
+    const [dbSales, zohoResult] = await Promise.all([
       this.databaseService.getSalesWithItems(fromDate, toDate),
-      this.zohoService.listQuotes(fromDate, toDate),
+      this.zohoService.listQuotes(fromDate, toDate),   // now returns ZohoListResponse
     ]);
 
+    const { quotes: zohoQuotes, unavailableDates, partial } = zohoResult;
 
+    if (partial) {
+      this.logger.warn(
+        `⚠️ Partial Zoho data — unavailable dates: ${unavailableDates.join(', ')}`
+      );
+    }
+
+    // Only hydrate quotes that don't already have line items
+    // and skip hydration entirely if we already know Zoho is rate-limiting us
     const hydratedZohoQuotes = await Promise.all(
       zohoQuotes.map(async (quote) => {
-        if (quote.line_items && quote.line_items.length > 0) return quote; // already has items (e.g. from cache)
+        if (quote.line_items && quote.line_items.length > 0) return quote;
+
+        if (partial) {
+          // Zoho is already throttling — don't fire more requests
+          this.logger.debug(`Skipping hydration for ${quote.estimate_id} — rate limit active`);
+          return quote;
+        }
+
         try {
           const detail = await this.zohoService.getQuoteDetail(quote.estimate_id);
           return { ...quote, line_items: detail.line_items };
         } catch (err: any) {
-          this.logger.warn(`⚠️ Could not hydrate line items for ${quote.estimate_id}: ${err?.message}`);
-          return quote; // fall back to empty, don't crash the whole report
+          this.logger.warn(`⚠️ Could not hydrate ${quote.estimate_id}: ${err?.message}`);
+          return quote;
         }
       })
     );
@@ -156,6 +174,8 @@ export class ReconciliationService {
       from: fromDate,
       to: toDate,
       generated_at: new Date().toISOString(),
+      partial,
+      unavailableDates,
       days,
     };
   }
