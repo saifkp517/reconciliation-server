@@ -1,5 +1,5 @@
-import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, OneToMany, JoinColumn, UpdateDateColumn } from 'typeorm';
-import { Customer } from '../../database/entities/customer.entity';
+import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, ManyToOne, OneToMany, JoinColumn, UpdateDateColumn, AfterLoad } from 'typeorm';
+import { Customer } from './customer.entity';
 import { SaleItem } from './sale-item.entity';
 import { SaleTruck } from '../../trucks/entities/sale-truck.entity';
 
@@ -35,4 +35,14 @@ export class Sale {
 
   @OneToMany(() => SaleItem, item => item.sale, { cascade: true })
   items!: SaleItem[];
+
+  totalAmount!: number; // virtual field, no @Column
+
+  @AfterLoad()
+  computeTotalAmount() {
+    this.totalAmount = (this.items ?? []).reduce(
+      (sum, item) => sum + Number(item.line_sp),
+      0
+    );
+  }
 }

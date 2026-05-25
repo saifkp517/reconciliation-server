@@ -1,5 +1,14 @@
 import { IsInt, IsString, IsIn, Min } from 'class-validator';
-import { VALID_DIMENSIONS } from '../entities/inventory.entity';
+
+export const VALID_DIMENSIONS = [
+  'BLOCK 4 inches',
+  'BLOCK 6 inches',
+  'BLOCK 8 inches',
+] as const;
+
+export type BlockDimension = (typeof VALID_DIMENSIONS)[number];
+export type InventoryKey = BlockDimension | 'CEMENT_BAGS';
+export type TransactionType = 'PRODUCTION' | 'DELIVERY' | 'PURCHASE' | 'ADJUSTMENT';
 
 export class UpdateBlockStockDto {
   /**

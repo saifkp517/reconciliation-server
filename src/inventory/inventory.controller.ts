@@ -1,60 +1,36 @@
-import { Body, Controller, Get, Param, Patch, Post } from '@nestjs/common';
+import { Controller, Post, Get, Body, Param, UseGuards, HttpCode, HttpStatus, Req } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
-import {
-    AddBlockStockDto,
-    AddCementBagsDto,
-    UpdateBlockStockDto,
-} from './dto/inventory.dto';
-import { InventoryLog } from './entities/inventory-log.entity';
-import { CreateInventoryLogDto } from './dto/inventory-log.dto';
+import { AddBlockStockDto, AddCementBagsDto } from './dto/inventory.dto';
+import { InventoryItemName } from './entities/inventory_items.entity';
 
 @Controller('inventory')
 export class InventoryController {
-    constructor(private readonly inventoryService: InventoryService) { }
+  constructor(private readonly inventoryService: InventoryService) { }
 
-    // GET /inventory
-    @Get()
-    getAll() {
-        return this.inventoryService.getAll();
-    }
+  @Get('stock')
+  getAllStock() {
+    return this.inventoryService.getAllStock();
+  }
 
-    // ── Logs ───────────────────────────────────────────────────────────────────
-    // ⚠️ These must be above :key to avoid being swallowed by it
+  @Get('logs')
+  getProductionLogs() {
+    return this.inventoryService.getProductionLogs();
+  }
 
-    // GET /inventory/logs
-    @Get('logs')
-    getLogs(): Promise<InventoryLog[]> {
-        return this.inventoryService.getLogs();
-    }
+  @Get('stock/:name')
+  getStock(@Param('name') name: InventoryItemName) {
+    return this.inventoryService.getStock(name);
+  }
 
+  @Post('cement/restock')
+  @HttpCode(HttpStatus.OK)
+  restockCement(@Body() dto: AddCementBagsDto) {
+    return this.inventoryService.addCementStock(dto.amount);
+  }
 
-    // POST /inventory/logs
-    @Post('logs')
-    createLog(@Body() dto: CreateInventoryLogDto): Promise<InventoryLog> {
-        return this.inventoryService.createLog(dto);
-    }
-
-    // ── Blocks ─────────────────────────────────────────────────────────────────
-
-    // POST /inventory/blocks/add
-    @Post('blocks/manufacture')
-    addBlockStock(@Body() dto: AddBlockStockDto) {
-        return this.inventoryService.manufactureBlocks(dto);
-    }
-
-    // ── Cement bags ────────────────────────────────────────────────────────────
-
-    // POST /inventory/cement-bags/add
-    @Post('cement-bags/add')
-    addCementBags(@Body() dto: AddCementBagsDto) {
-        return this.inventoryService.addCementBags(dto);
-    }
-
-    // ── Wildcard — must be last ────────────────────────────────────────────────
-
-    // GET /inventory/:key
-    @Get(':key')
-    getOne(@Param('key') key: string) {
-        return this.inventoryService.getByKey(key as any);
-    }
+  @Post('produce')
+  @HttpCode(HttpStatus.OK)
+  logProduction(@Body() dto: AddBlockStockDto) {
+    return this.inventoryService.manufactureBlocks(dto);
+  }
 }
