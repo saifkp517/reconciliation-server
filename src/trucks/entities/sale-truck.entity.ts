@@ -16,10 +16,10 @@ export class SaleTruck {
   truck_id!: number;
 
   @Column({ type: 'timestamp', nullable: true })
-  departed_at!: Date;
+  departed_at!: Date | null;
 
   @Column({ type: 'timestamp', nullable: true })
-  arrived_at!: Date;
+  arrived_at!: Date | null;
 
   @Column({ default: 'pending' })
   status!: string;

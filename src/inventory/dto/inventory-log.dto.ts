@@ -4,10 +4,11 @@ import {
   IsEnum, IsInt, IsNotEmpty, IsOptional,
   IsString, ValidateNested, ArrayMinSize, IsArray,
 } from 'class-validator';
-import type { TransactionType } from '../entities/inventory-log.entity';
-import type { InventoryKey } from '../entities/inventory.entity';
+import { type TransactionType } from './inventory.dto';
+import { type InventoryKey } from './inventory.dto';
 
-export class LogItemDto {
+
+export class ChallanItemDto {
   @IsString()
   @IsNotEmpty()
   inventory_key!: InventoryKey;
@@ -17,7 +18,7 @@ export class LogItemDto {
   delta!: number;
 }
 
-export class CreateInventoryLogDto {
+export class CreateDeliveryChallanDto {
   @IsEnum(['PRODUCTION', 'DELIVERY', 'PURCHASE', 'ADJUSTMENT'])
   transaction_type!: TransactionType;
 
@@ -28,6 +29,6 @@ export class CreateInventoryLogDto {
   @IsArray()
   @ArrayMinSize(1)
   @ValidateNested({ each: true })
-  @Type(() => LogItemDto)
-  items!: LogItemDto[];
+  @Type(() => ChallanItemDto)
+  items!: ChallanItemDto[];
 }

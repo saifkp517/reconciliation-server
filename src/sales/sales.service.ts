@@ -1,35 +1,40 @@
-import { BadRequestException, Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  Injectable,
+  Logger,
+  NotFoundException,
+} from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
 import { Sale } from './entities/sale.entity';
 import { SaleItem } from './entities/sale-item.entity';
 import { SaleTruck } from '../trucks/entities/sale-truck.entity';
 import { SaleTruckItem } from '../trucks/entities/sale-truck-item.entity';
-import { Customer } from '../database/entities/customer.entity';
-import { AuthService } from '../auth/auth.service';
-import axios from 'axios';
+import { Customer } from './entities/customer.entity';
 import { Truck } from '../trucks/entities/truck.entity';
 import { InventoryService } from '../inventory/inventory.service';
+import { TrucksService } from '../trucks/trucks.service';
+import { CustomerPriceList } from './entities/customer_pricelist.entity';
+import { InventoryItemName } from '../inventory/entities/inventory_items.entity';
+import { DIMENSION_TO_ITEM_NAME } from '../inventory/inventory_store.service';
 
+// ─── DTOs ─────────────────────────────────────────────────────────────────────
 
 interface CreateCustomerDto {
-  name?: string;
-  phone?: string;
-  zoho_id?: string;
+  name: string;
+  address?: string;
+  phone: string;
 }
 
 export interface CreateSaleDto {
   customer_id: number;
-  sale_date: string; // YYYY-MM-DD (recommended)
-  items: {
-    dimension: string;
-    quantity: number;
-  }[];
+  sale_date: string;
+  items: { dimension: string; quantity: number }[];
   trucks?: CreateSaleTruckDto[];
 }
 
 export interface CreateSaleTruckItemDto {
-  sale_item_index: number; // index into the items array
+  sale_item_index: number;
   quantity: number;
   notes?: string;
 }
@@ -38,13 +43,25 @@ export interface CreateSaleTruckDto {
   truck_id: number;
   notes?: string;
   items: CreateSaleTruckItemDto[];
+  departed_at?: string;
+  arrived_at?: string;
 }
 
-const ITEM_CATALOG: Record<string, { item_id: string; rate: number; purchase_rate: number; name: string }> = {
-  'BLOCK 4 inches': { item_id: '3644122000000051003', rate: 29, purchase_rate: 20, name: 'BLOCK 4 inches' },
-  'BLOCK 6 inches': { item_id: '3644122000000051021', rate: 36, purchase_rate: 26, name: 'BLOCK 6 inches' },
-  'BLOCK 8 inches': { item_id: '3644122000000051039', rate: 44, purchase_rate: 32, name: 'BLOCK 8 inches' },
+export class UpdateCustomerDto {
+  name?: string;
+  phone?: string;
+  prices?: Partial<Record<InventoryItemName, number>>;
+}
+
+// ─── Item catalog (was fetched from Zoho, now lives here) ─────────────────────
+
+const ITEM_CATALOG: Record<string, { rate: number; purchase_rate: number; name: string }> = {
+  'BLOCK 4 inches': { rate: 29, purchase_rate: 20, name: 'BLOCK 4 inches' },
+  'BLOCK 6 inches': { rate: 36, purchase_rate: 26, name: 'BLOCK 6 inches' },
+  'BLOCK 8 inches': { rate: 44, purchase_rate: 32, name: 'BLOCK 8 inches' },
 };
+
+// ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
 export class SalesService {
@@ -52,187 +69,178 @@ export class SalesService {
 
   constructor(
     @InjectRepository(Sale)
-    private saleRepository: Repository<Sale>,
+    private readonly saleRepo: Repository<Sale>,
     @InjectRepository(Customer)
-    private customerRepository: Repository<Customer>,
-    private authService: AuthService,
-    private dataSource: DataSource,
+    private readonly customerRepo: Repository<Customer>,
+    @InjectRepository(CustomerPriceList)
+    private readonly priceListRepo: Repository<CustomerPriceList>,
+    private readonly dataSource: DataSource,
     private readonly inventoryService: InventoryService,
+    private readonly trucksService: TrucksService,
   ) { }
 
-  async getCustomers() {
-    return this.customerRepository.find();
-  }
+  // ─── Catalog ────────────────────────────────────────────────────────────
 
-  async createCustomer(data: CreateCustomerDto): Promise<Customer> {
-    const { zoho_id, phone, name } = data;
-
-    // Prevent duplicate if zoho_id exists
-    if (zoho_id) {
-      const existing = await this.customerRepository.findOne({
-        where: { zoho_id },
-      });
-
-      if (existing) {
-        return existing; // idempotent behavior for webhook
-      }
-    }
-
-    const customer = this.customerRepository.create({
-      name,
-      phone,
-      zoho_id,
-    });
-
-    return await this.customerRepository.save(customer);
-  }
-
-  async getSaleById(id: number): Promise<Sale> {
-    const sale = await this.saleRepository.findOne({
-      where: { id },
-      relations: {
-        customer: true,
-        items: true,
-        trucks: {
-          truck: true,
-          items: true,
-        },
-      },
-    });
-
-    if (!sale) {
-      throw new NotFoundException(`Sale #${id} not found`);
-    }
-
-    return sale;
-  }
-
-
-  async getItems(): Promise<any[]> {
+  getItems(): { rate: number; purchase_rate: number; name: string }[] {
     return Object.values(ITEM_CATALOG);
   }
 
-
-  async getItemByDimension(dimension: string) {
-    const items = await this.getItems();
-
-    const item = items.find(i => i.name === dimension);
-
-    if (!item) {
-      throw new Error(`Zoho item not found for dimension: ${dimension}`);
-    }
-
+  private getItemByDimension(dimension: string) {
+    const item = ITEM_CATALOG[dimension];
+    if (!item) throw new BadRequestException(`Unknown block dimension: ${dimension}`);
     return item;
   }
 
+  // ─── Customers ───────────────────────────────────────────────────────────
+
+  async updateCustomer(id: number, dto: UpdateCustomerDto): Promise<Customer> {
+    const { prices, ...customerFields } = dto;
+
+    // update customer fields if any provided
+    if (Object.keys(customerFields).length > 0) {
+      await this.customerRepo.update(id, customerFields);
+    }
+
+    // upsert each price if provided
+    if (prices) {
+      await Promise.all(
+        Object.entries(prices).map(([itemName, price]) => {
+          const mappedItemName = DIMENSION_TO_ITEM_NAME[itemName];
+
+          if (!mappedItemName) {
+            throw new BadRequestException(
+              `Invalid item name: "${itemName}". Allowed values: ${Object.keys(DIMENSION_TO_ITEM_NAME).join(', ')}`,
+            );
+          }
+
+          return this.priceListRepo.upsert(
+            { customer: { id }, itemName: mappedItemName, price },
+            ['customer', 'itemName'],
+          );
+        }),
+      );
+    }
+    // return fresh record with updated price list
+    return this.customerRepo.findOneOrFail({
+      where: { id },
+      relations: { priceLists: true },
+    });
+  }
+
+  async getCustomers(): Promise<Customer[]> {
+    return this.customerRepo.find({
+      relations: { priceLists: true },
+      order: { name: 'ASC' },
+    });
+  }
+
+  async getCustomer(id: number): Promise<Customer | null> {
+    return this.customerRepo.findOne({
+      relations: { sales: true, priceLists: true },
+      where: { id }
+    })
+  }
+
+  async createCustomer(data: CreateCustomerDto): Promise<Customer> {
+    const { name, phone } = data;
+
+    if (!name || !phone) {
+      throw new BadRequestException('Both name and phone are required');
+    }
+
+    const existing = await this.customerRepo.findOne({ where: { phone } });
+    if (existing) return existing;
+
+    return this.customerRepo.save(this.customerRepo.create({ name, phone }));
+  }
+
+  // ─── Sales reads ────────────────────────────────────────────────────────
+
+  async getSaleById(id: number): Promise<Sale> {
+    const sale = await this.saleRepo.findOne({
+      where: { id },
+      relations: { customer: true, items: true, trucks: { truck: true, items: true } },
+    });
+    if (!sale) throw new NotFoundException(`Sale #${id} not found`);
+    return sale;
+  }
+
+  async getAllSales(): Promise<Sale[]> {
+    return this.saleRepo.find({
+      relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
+      order: { sale_date: 'DESC', id: 'DESC' },
+    });
+  }
+
+  // ─── createSale ──────────────────────────────────────────────────────────
+
   async createSale(dto: CreateSaleDto): Promise<Sale | null> {
     return this.dataSource.transaction(async manager => {
-      const sale_date = dto.sale_date;
+      const { sale_date } = dto;
 
+      // ── Invoice number ──────────────────────────────────────────────────
       const countToday = await manager.count(Sale, { where: { sale_date } });
-      const sequence = String(countToday + 1).padStart(3, '0');
-      const invoice_no = `INV-${sale_date.replace(/-/g, '')}-${sequence}`;
+      const invoice_no = `INV-${sale_date.replace(/-/g, '')}-${String(countToday + 1).padStart(3, '0')}`;
 
-      // step 1 — create sale header
-      const sale = manager.create(Sale, {
-        customer_id: dto.customer_id,
-        sale_date,
-        invoice_no,
-      });
-      const savedSale = await manager.save(Sale, sale);
+      // ── Sale header ─────────────────────────────────────────────────────
+      const savedSale = await manager.save(
+        Sale,
+        manager.create(Sale, { customer_id: dto.customer_id, sale_date, invoice_no }),
+      );
 
-      // step 2 — create sale items
-      const saleItems: SaleItem[] = [];
+      const normalizeItemName = (name: string) =>
+        name.toUpperCase().replace(/\s+/g, '_');
 
-      for (const item of dto.items) {
-        const zohoItem = await this.getItemByDimension(item.dimension);
-
-        const unit_sp = zohoItem.rate;
-        const unit_cp = zohoItem.purchase_rate;
-
-        saleItems.push(
-          manager.create(SaleItem, {
-            sale_id: savedSale.id,
-            dimension: item.dimension,
-            quantity: item.quantity,
-            unit_sp,
-            unit_cp,
-            zoho_item_id: zohoItem.item_id,
-            name: zohoItem.name,
-            line_sp: unit_sp * item.quantity,
-            line_cp: unit_cp * item.quantity,
-          }),
-        );
-      }
-      const savedItems = await manager.save(SaleItem, saleItems);
-
-
-      // step 4 — assign trucks if provided
-      if (dto.trucks?.length) {
-        for (const truckDto of dto.trucks) {
-          // validate truck exists and is active
-          const truck = await manager.findOne(Truck, {
-            where: { id: truckDto.truck_id, is_active: false },
-          });
-          if (!truck) {
-            console.log(`Truck validation failed for truck_id ${truckDto.truck_id}`);
-            throw new BadRequestException(
-              `Truck ${truckDto.truck_id} does not exist or is not active`,
-            );
-          }
-
-          // 👇 mark truck as busy right after validation
-          await manager.update(Truck, truckDto.truck_id, { is_active: true });
-
-          // validate: quantities per sale_item_index must not exceed item quantity
-          for (const ti of truckDto.items) {
-            const saleItem = dto.items[ti.sale_item_index];
-            if (!saleItem) {
-              throw new BadRequestException(
-                `Invalid sale_item_index: ${ti.sale_item_index}`,
-              );
-            }
-
-            const totalAssigned = dto.trucks.reduce((sum, t) =>
-              sum + t.items
-                .filter(i => i.sale_item_index === ti.sale_item_index)
-                .reduce((s, i) => s + i.quantity, 0),
-              0,
-            );
-
-            if (totalAssigned > saleItem.quantity) {
-              throw new BadRequestException(
-                `Quantities assigned to trucks for item[${ti.sale_item_index}] ` +
-                `exceed sale item quantity (${totalAssigned} > ${saleItem.quantity})`,
-              );
-            }
-          }
-
-          const saleTruck = await manager.save(
-            manager.create(SaleTruck, {
-              sale_id: savedSale.id,
-              truck_id: truckDto.truck_id,
-              notes: truckDto.notes,
-              status: 'pending',
-              departed_at: new Date(),
-            }),
-          );
-
-          const truckItems = truckDto.items.map(ti =>
-            manager.create(SaleTruckItem, {
-              sale_truck_id: saleTruck.id,
-              sale_item_id: savedItems[ti.sale_item_index].id,
-              quantity: ti.quantity,
-              notes: ti.notes,
-            }),
-          );
-
-          await manager.save(SaleTruckItem, truckItems);
+      // ── Customer price list (fetch once, key by itemName) ───────────────
+      const customerPriceMap = new Map<string, number>();
+      if (dto.customer_id) {
+        const customerPrices = await manager.find(CustomerPriceList, {
+          where: { customer: { id: dto.customer_id} },
+        });
+        console.log({ customer_id: dto.customer_id, customerPrices });
+        for (const cp of customerPrices) {
+          customerPriceMap.set(normalizeItemName(cp.itemName), Number(cp.price));
         }
       }
 
-      // step 0.5 — validate & deduct inventory (throws → rolls back whole tx) ──
-      await this.inventoryService.validateAndDeductStock(dto.items, manager, undefined, savedSale.id);
+      // ── Sale items ──────────────────────────────────────────────────────
+      const savedItems = await manager.save(
+        SaleItem,
+        dto.items.map(item => {
+          const catalog = this.getItemByDimension(item.dimension);
+          console.log({
+            catalogName: catalog.name,
+            normalized: normalizeItemName(catalog.name),
+            mapKeys: [...customerPriceMap.keys()],
+          });
+
+          const unit_sp = customerPriceMap.get(normalizeItemName(catalog.name)) ?? catalog.rate;
+
+          return manager.create(SaleItem, {
+            sale_id: savedSale.id,
+            dimension: item.dimension,
+            quantity: item.quantity,
+            name: catalog.name,
+            unit_sp,
+            unit_cp: catalog.purchase_rate,
+            line_sp: unit_sp * item.quantity,
+            line_cp: catalog.purchase_rate * item.quantity,
+          });
+        }),
+      );
+
+      // ── Inventory deduction (inside tx — throws rolls everything back) ──
+      await this.inventoryService.validateAndDeductStock(
+        dto.items,
+        `Sale ${invoice_no}`,
+        'watchman',
+        manager,
+      );
+
+      // ── Trucks ──────────────────────────────────────────────────────────
+      if (dto.trucks?.length) {
+        await this.trucksService.assignTrucksToSale(manager, savedSale.id, savedItems, dto.items, dto.trucks);
+      }
 
       return manager.findOne(Sale, {
         where: { id: savedSale.id },
@@ -240,155 +248,76 @@ export class SalesService {
       });
     });
   }
-
-  async getAllSales(): Promise<Sale[]> {
-    return this.saleRepository.find({
-      relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
-      order: { sale_date: 'DESC', id: 'DESC' },
-    });
-  }
+  // ─── updateSale ──────────────────────────────────────────────────────────
 
   async updateSale(id: number, dto: Partial<CreateSaleDto>): Promise<Sale | null> {
-    // STEP 1 — preload Zoho data (outside transaction)
-    let itemMap: Map<string, any> | null = null;
-
-    if (dto.items) {
-      const zohoItems = await this.getItems();
-      itemMap = new Map(zohoItems.map(i => [i.name, i]));
-    }
-
     return this.dataSource.transaction(async manager => {
-      const sale = await manager.findOne(Sale, {
-        where: { id },
-        relations: ['items'],
-      });
+      const sale = await manager.findOne(Sale, { where: { id }, relations: ['items'] });
+      if (!sale) throw new NotFoundException(`Sale #${id} not found`);
 
-      if (!sale) throw new Error(`Sale with id ${id} not found`);
+      // ── Header ──────────────────────────────────────────────────────────
+      const patch: Partial<Sale> = {};
+      if (dto.customer_id) patch.customer_id = dto.customer_id;
+      if (dto.sale_date) patch.sale_date = dto.sale_date;
+      if (Object.keys(patch).length) await manager.update(Sale, id, patch);
 
-      // STEP 2 — update header fields
-      const updatePayload: Partial<Sale> = {};
-      if (dto.customer_id) updatePayload.customer_id = dto.customer_id;
-      if (dto.sale_date) updatePayload.sale_date = dto.sale_date;
-
-      if (Object.keys(updatePayload).length > 0) {
-        await manager.update(Sale, id, updatePayload);
-      }
-
-      // STEP 3 — replace items if provided
-      let newItems: SaleItem[] = sale.items;
+      // ── Items ───────────────────────────────────────────────────────────
+      let currentItems: SaleItem[] = sale.items;
 
       if (dto.items) {
-        // 3a — wipe sale_truck_items and sale_trucks first (they reference sale_items)
-        const existingItemIds = sale.items.map(i => i.id);
-
-        if (existingItemIds.length > 0) {
+        // wipe truck assignments that reference old sale_items
+        const oldItemIds = sale.items.map(i => i.id);
+        if (oldItemIds.length) {
           await manager
             .createQueryBuilder()
             .delete()
             .from('sale_truck_items')
-            .where('sale_item_id IN (:...ids)', { ids: existingItemIds })
+            .where('sale_item_id IN (:...ids)', { ids: oldItemIds })
             .execute();
         }
-
-        // 3b — wipe sale_trucks for this sale
-        await manager
-          .createQueryBuilder()
-          .delete()
-          .from('sale_trucks')
-          .where('sale_id = :id', { id })
-          .execute();
-
-        // 3c — wipe and re-insert sale_items
+        await manager.createQueryBuilder().delete().from('sale_trucks').where('sale_id = :id', { id }).execute();
         await manager.delete(SaleItem, { sale_id: id });
 
-        newItems = [];
-
-        for (const item of dto.items) {
-          const zohoItem = itemMap!.get(item.dimension);
-
-          if (!zohoItem) {
-            throw new Error(`Zoho item not found for dimension: ${item.dimension}`);
-          }
-
-          const unit_sp = zohoItem.rate;
-          const unit_cp = zohoItem.purchase_rate;
-
-          newItems.push(
-            manager.create(SaleItem, {
+        currentItems = await manager.save(
+          SaleItem,
+          dto.items.map(item => {
+            const catalog = this.getItemByDimension(item.dimension);
+            return manager.create(SaleItem, {
               sale_id: id,
               dimension: item.dimension,
               quantity: item.quantity,
-              unit_sp,
-              unit_cp,
-              zoho_item_id: zohoItem.item_id,
-              name: zohoItem.name,
-              line_sp: unit_sp * item.quantity,
-              line_cp: unit_cp * item.quantity,
-            }),
-          );
-        }
-
-        newItems = await manager.save(SaleItem, newItems);
+              name: catalog.name,
+              unit_sp: catalog.rate,
+              line_sp: catalog.rate * item.quantity,
+            });
+          }),
+        );
       }
 
-      // STEP 4 — re-assign trucks if provided
+      // ── Trucks ──────────────────────────────────────────────────────────
       if (dto.trucks) {
         if (!dto.items) {
-          // trucks provided but items weren't replaced — wipe existing truck assignments first
-          const existingItemIds = sale.items.map(i => i.id);
-
-          if (existingItemIds.length > 0) {
+          // trucks-only update — wipe existing assignments first
+          const oldItemIds = sale.items.map(i => i.id);
+          if (oldItemIds.length) {
             await manager
               .createQueryBuilder()
               .delete()
               .from('sale_truck_items')
-              .where('sale_item_id IN (:...ids)', { ids: existingItemIds })
+              .where('sale_item_id IN (:...ids)', { ids: oldItemIds })
               .execute();
           }
-
-          await manager
-            .createQueryBuilder()
-            .delete()
-            .from('sale_trucks')
-            .where('sale_id = :id', { id })
-            .execute();
+          await manager.createQueryBuilder().delete().from('sale_trucks').where('sale_id = :id', { id }).execute();
         }
 
-        for (const truckDto of dto.trucks) {
-          const saleTruck = await manager.save(SaleTruck,
-            manager.create(SaleTruck, {
-              sale_id: id,
-              truck_id: truckDto.truck_id,
-              status: 'pending',
-            })
-          );
-
-          for (const truckItem of truckDto.items) {
-            const targetItem = newItems[truckItem.sale_item_index];
-
-            if (!targetItem) {
-              throw new Error(`No sale item at index ${truckItem.sale_item_index}`);
-            }
-
-            await manager.save(SaleTruckItem,
-              manager.create(SaleTruckItem, {
-                sale_truck_id: saleTruck.id,
-                sale_item_id: targetItem.id,
-                quantity: truckItem.quantity,
-                notes: truckItem.notes,
-              })
-            );
-          }
-        }
+        await this.trucksService.assignTrucksToSale(manager, id, currentItems, dto.items ?? sale.items.map(i => ({ dimension: i.dimension, quantity: i.quantity })), dto.trucks);
       }
-
-
-
 
       return manager.findOne(Sale, {
         where: { id },
-        relations: ['items', 'customer'],
+        relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
       });
     });
   }
+
 }

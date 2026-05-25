@@ -1,63 +1,54 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { ConfigService } from '@nestjs/config';
-import axios from 'axios';
-
-interface TokenData {
-  accessToken: string;
-  expiresAt: number; // unix timestamp in ms
-}
+import { Injectable, UnauthorizedException, BadRequestException, ConflictException } from '@nestjs/common'
+import { InjectRepository } from '@nestjs/typeorm'
+import { Repository } from 'typeorm'
+import { User } from './user.entity'
+import * as bcrypt from 'bcrypt'
 
 @Injectable()
-export class AuthService {
-  private readonly logger = new Logger(AuthService.name);
-  private tokenData: TokenData | null = null;
+export class UsersService {
+  constructor(
+    @InjectRepository(User)
+    private usersRepo: Repository<User>,
+  ) {}
 
-  constructor(private configService: ConfigService) { }
+  async login(username: string, password: string) {
+    const user = await this.usersRepo.findOne({ where: { username } })
+    if (!user) throw new UnauthorizedException('Invalid username or password')
 
-  async getValidAccessToken(): Promise<string> {
-    // if we have a token and it's not expired (with 60s buffer), return it
-    if (this.tokenData && Date.now() < this.tokenData.expiresAt - 60_000) {
-      this.logger.log('♻️  Using cached access token');
-      return this.tokenData.accessToken;
-    }
+    const match = await bcrypt.compare(password, user.password_hash)
+    if (!match) throw new UnauthorizedException('Invalid username or password')
 
-    this.logger.log('🔄 Access token expired or missing, refreshing...');
-    return this.refreshAccessToken();
+    return { id: user.id, username: user.username, role: user.role }
   }
 
-  private async refreshAccessToken(): Promise<string> {
-    const clientId = this.configService.get<string>('ZOHO_CLIENT_ID');
-    const clientSecret = this.configService.get<string>('ZOHO_CLIENT_SECRET');
-    const refreshToken = this.configService.get<string>('ZOHO_REFRESH_TOKEN');
+  async createUser(username: string, password: string, role: string) {
+    const existing = await this.usersRepo.findOne({ where: { username } })
+    if (existing) throw new ConflictException('Username already exists')
 
-    try {
-      const response = await axios.post(
-        'https://accounts.zoho.in/oauth/v2/token',
-        null,
-        {
-          params: {
-            grant_type: 'refresh_token',
-            client_id: clientId,
-            client_secret: clientSecret,
-            refresh_token: refreshToken,
-          },
-        },
-      );
+    if (password.length < 6) throw new BadRequestException('Password must be 6+ characters')
 
-      const { access_token, expires_in, scope } = response.data;
-      this.logger.log(`✅ Token scopes: ${scope}`);
+    const password_hash = await bcrypt.hash(password, 10)
+    const user = this.usersRepo.create({ username, password_hash, role })
+    await this.usersRepo.save(user)
 
-      this.tokenData = {
-        accessToken: access_token,
-        expiresAt: Date.now() + expires_in * 1000, // expires_in is in seconds
-      };
+    return { id: user.id, username: user.username, role: user.role }
+  }
 
-      this.logger.log('✅ Access token refreshed successfully');
-      return this.tokenData.accessToken;
+  async resetPassword(userId: string, newPassword: string) {
+    if (newPassword.length < 6) throw new BadRequestException('Password must be 6+ characters')
 
-    } catch (err) {
-      this.logger.error('❌ Failed to refresh Zoho access token', err);
-      throw new Error('Failed to refresh Zoho access token');
-    }
+    const password_hash = await bcrypt.hash(newPassword, 10)
+    await this.usersRepo.update(userId, { password_hash })
+  }
+
+  async listUsers() {
+    return this.usersRepo.find({
+      select: ['id', 'username', 'role', 'created_at'],
+      order: { created_at: 'DESC' },
+    })
+  }
+
+  async deleteUser(userId: string) {
+    await this.usersRepo.delete(userId)
   }
 }
