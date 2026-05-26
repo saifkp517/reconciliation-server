@@ -2,7 +2,8 @@
 
 set -e
 
-export PATH="/root/.nvm/versions/node/v24.16.0/bin:$PATH"
+export NVM_DIR="/root/.nvm"
+source "$NVM_DIR/nvm.sh"
 
 cd /var/www/reconciliation-server
 
