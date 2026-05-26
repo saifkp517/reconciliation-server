@@ -28,8 +28,8 @@ export class SalesController {
   async createCustomer(@Body() body: any) {
     return this.salesService.createCustomer({
       name: body.name,
-
       phone: body.phone,
+      priceLists: body.priceLists || [],
     });
   }
 

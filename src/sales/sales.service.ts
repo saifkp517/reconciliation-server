@@ -17,13 +17,34 @@ import { TrucksService } from '../trucks/trucks.service';
 import { CustomerPriceList } from './entities/customer_pricelist.entity';
 import { InventoryItemName } from '../inventory/entities/inventory_items.entity';
 import { DIMENSION_TO_ITEM_NAME } from '../inventory/inventory_store.service';
+import { Type } from 'class-transformer';
+import { IsEnum, IsNotEmpty, IsNumber, IsString, Min, ValidateNested, ArrayNotEmpty, IsArray } from 'class-validator';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
-interface CreateCustomerDto {
-  name: string;
-  address?: string;
-  phone: string;
+export class CreatePriceListDto {
+  @IsEnum(InventoryItemName)
+  itemName!: InventoryItemName;
+
+  @IsNumber()
+  @Min(0)
+  price!: number;
+}
+
+export class CreateCustomerDto {
+  @IsString()
+  @IsNotEmpty()
+  name!: string;
+
+  @IsString()
+  @IsNotEmpty()
+  phone!: string;
+
+  @IsArray()
+  @ArrayNotEmpty()
+  @ValidateNested({ each: true })
+  @Type(() => CreatePriceListDto)
+  priceLists!: CreatePriceListDto[];
 }
 
 export interface CreateSaleDto {
@@ -141,17 +162,32 @@ export class SalesService {
     })
   }
 
-  async createCustomer(data: CreateCustomerDto): Promise<Customer> {
-    const { name, phone } = data;
-
-    if (!name || !phone) {
-      throw new BadRequestException('Both name and phone are required');
-    }
+  async createCustomer(data: CreateCustomerDto): Promise<Customer | null> {
+    const { name, phone, priceLists } = data;
 
     const existing = await this.customerRepo.findOne({ where: { phone } });
-    if (existing) return existing;
+    if (existing) {
+      throw new BadRequestException(`A customer with phone ${phone} already exists.`);
+    }
 
-    return this.customerRepo.save(this.customerRepo.create({ name, phone }));
+    const customer = await this.customerRepo.save(
+      this.customerRepo.create({ name, phone })
+    );
+
+    const priceEntities = priceLists.map((entry) =>
+      this.priceListRepo.create({
+        customer,
+        itemName: entry.itemName,
+        price: entry.price,
+      })
+    );
+
+    await this.priceListRepo.save(priceEntities);
+
+    return this.customerRepo.findOne({
+      where: { id: customer.id },
+      relations: ['priceLists'],
+    });
   }
 
   // ─── Sales reads ────────────────────────────────────────────────────────
@@ -195,7 +231,7 @@ export class SalesService {
       const customerPriceMap = new Map<string, number>();
       if (dto.customer_id) {
         const customerPrices = await manager.find(CustomerPriceList, {
-          where: { customer: { id: dto.customer_id} },
+          where: { customer: { id: dto.customer_id } },
         });
         console.log({ customer_id: dto.customer_id, customerPrices });
         for (const cp of customerPrices) {
