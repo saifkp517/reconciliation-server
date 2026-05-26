@@ -1,4 +1,4 @@
-import { Controller, Post, Get, Patch, Body, Param } from '@nestjs/common'
+import { Controller, Post, Get, Patch, Body, Param, Delete } from '@nestjs/common'
 import { EmployeeExpenseService } from './employee-expense.service'
 
 @Controller('expenses')
@@ -6,7 +6,7 @@ export class EmployeeExpenseController {
   constructor(private readonly employeeExpenseService: EmployeeExpenseService) {}
 
   @Post()
-  create(@Body() body: { username: string; description: string; amount: number; date?: string }) {
+  create(@Body() body: { username: string; description: string; amount: number; qty: number; date?: string }) {
     return this.employeeExpenseService.create(body.username, body)
   }
 
@@ -21,5 +21,10 @@ export class EmployeeExpenseController {
     @Body() body: { username: string; description?: string; amount?: number; date?: string }
   ) {
     return this.employeeExpenseService.update(body.username, id, body)
+  }
+
+  @Delete(':id')
+  delete(@Param('id') id: string) {
+    return this.employeeExpenseService.deleteExpense(id)
   }
 }

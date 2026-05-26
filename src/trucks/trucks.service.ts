@@ -80,10 +80,14 @@ export class TrucksService {
     savedItems: SaleItem[],
     dtoItems: { dimension: string; quantity: number }[],
     trucks: CreateSaleTruckDto[],
+    skipActiveCheck = false,
   ): Promise<void> {
     for (const truckDto of trucks) {
       const truck = await manager.findOne(Truck, {
-        where: { id: truckDto.truck_id, is_active: false },
+        where: {
+          id: truckDto.truck_id,
+          ...(skipActiveCheck ? {} : { is_active: false }),
+        },
       });
       if (!truck) {
         throw new BadRequestException(

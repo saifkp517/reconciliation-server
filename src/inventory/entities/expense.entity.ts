@@ -1,5 +1,10 @@
 import {
-  Entity, PrimaryGeneratedColumn, Column, CreateDateColumn,
+  Entity,
+  PrimaryGeneratedColumn,
+  Column,
+  CreateDateColumn,
+  BeforeInsert,
+  BeforeUpdate,
 } from 'typeorm';
 
 @Entity('expenses')
@@ -13,9 +18,21 @@ export class Expense {
   @Column()
   description!: string;
 
-  @Column('decimal', { precision: 10, scale: 2 })
+  @Column('int')
   amount!: number;
+
+  @Column('int', { default: 1 })
+  qty!: number;
+
+  @Column('int', { name: 'total_amount', default: 0 })
+  totalAmount!: number;
 
   @CreateDateColumn({ name: 'created_at' })
   createdAt!: Date;
+
+  @BeforeInsert()
+  @BeforeUpdate()
+  calculateTotal() {
+    this.totalAmount = this.amount * this.qty;
+  }
 }
