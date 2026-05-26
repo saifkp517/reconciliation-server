@@ -310,7 +310,7 @@ export class SalesService {
           await manager.createQueryBuilder().delete().from('sale_trucks').where('sale_id = :id', { id }).execute();
         }
 
-        await this.trucksService.assignTrucksToSale(manager, id, currentItems, dto.items ?? sale.items.map(i => ({ dimension: i.dimension, quantity: i.quantity })), dto.trucks);
+        await this.trucksService.assignTrucksToSale(manager, id, currentItems, dto.items ?? sale.items.map(i => ({ dimension: i.dimension, quantity: i.quantity })), dto.trucks, true);
       }
 
       return manager.findOne(Sale, {
