@@ -2,12 +2,14 @@
 
 set -e
 
+export PATH="/root/.nvm/versions/node/v24.16.0/bin:$PATH"
+
 cd /var/www/reconciliation-server
 
 git fetch origin
 git reset --hard origin/main
 
-/root/.nvm/versions/node/v24.16.0/bin/npm install
-/root/.nvm/versions/node/v24.16.0/bin/npm run build
+npm install
+npm run build
 
-/root/.nvm/versions/node/v24.16.0/bin/pm2 restart 0
+pm2 restart 0
