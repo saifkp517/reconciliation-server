@@ -17,4 +17,4 @@ jobs:
           username: ${{ secrets.USERNAME }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            /var/www/reconciliation-server/deploy.sh
+            bash /var/www/reconciliation-server/deploy.sh
