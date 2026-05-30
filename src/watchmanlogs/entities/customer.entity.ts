@@ -1,6 +1,7 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany, UpdateDateColumn } from 'typeorm';
-import { Sale } from './sale.entity';
+import { Watchman_Logs } from './watchman-log.entity';
 import { CustomerPriceList } from './customer_pricelist.entity';
+import { Bill } from '../../bills/entities/bill.entity';
 
 @Entity('customers')
 export class Customer {
@@ -22,9 +23,13 @@ export class Customer {
   @UpdateDateColumn()
   updated_at!: Date;
 
-  @OneToMany(() => Sale, sale => sale.customer)
-  sales!: Sale[];
+  @OneToMany(() => Watchman_Logs, watchmanLog => watchmanLog.customer)
+  watchmanLogs!: Watchman_Logs[];
 
   @OneToMany(() => CustomerPriceList, priceList => priceList.customer)
   priceLists!: CustomerPriceList[];
+
+  @OneToMany(() => Bill, bill => bill.customer)
+  bills!: Bill[];
+
 }

@@ -1,11 +1,12 @@
 import { InjectRepository } from '@nestjs/typeorm';
 import { EntityManager } from 'typeorm';
-import { SaleItem } from '../sales/entities/sale-item.entity';
-import { CreateSaleTruckDto } from '../sales/sales.service';
-import { SaleTruckItem } from './entities/sale-truck-item.entity';
+import { Watchman_Logs } from '../watchmanlogs/entities/watchman-log.entity';
+import { Watchman_Log_Item } from '../watchmanlogs/entities/watchman-log-items.entity';
+import { WatchmanLogTruck } from './entities/watchmanlog-truck.entity';
+import { WatchmanLogTruckItem } from './entities/watchmanlog-truck-item.entity';
+import { CreateSaleTruckDto } from '../watchmanlogs/watchmanlogs.service';
 import { Between, Repository } from 'typeorm';
 import { Truck } from './entities/truck.entity';
-import { SaleTruck } from './entities/sale-truck.entity';
 import { Injectable, BadRequestException } from '@nestjs/common';
 
 @Injectable()
@@ -14,8 +15,8 @@ export class TrucksService {
     @InjectRepository(Truck)
     private truckRepo: Repository<Truck>,
 
-    @InjectRepository(SaleTruck)
-    private saleTruckRepo: Repository<SaleTruck>,
+    @InjectRepository(WatchmanLogTruck)
+    private saleTruckRepo: Repository<WatchmanLogTruck>,
   ) { }
 
   async getActiveTrucks(): Promise<Truck[]> {
@@ -26,12 +27,12 @@ export class TrucksService {
     });
   }
 
-  async getTruckTimeline(fromDate: Date, toDate: Date): Promise<SaleTruck[]> {
+  async getTruckTimeline(fromDate: Date, toDate: Date): Promise<WatchmanLogTruck[]> {
     return this.saleTruckRepo.find({
       where: {
         departed_at: Between(fromDate, toDate),
       },
-      relations: ['truck', 'sale', 'sale.customer', 'items', 'items.saleItem'],
+      relations: ['truck', 'watchmanLog', 'watchmanLog.customer', 'items', 'items.watchmanLogItem'],
       order: { departed_at: 'ASC' },
     });
   }
@@ -44,7 +45,7 @@ export class TrucksService {
     });
   }
 
-  async getTrucksBySale(saleId: number): Promise<SaleTruck[]> {
+  async getTrucksBySale(saleId: number): Promise<WatchmanLogTruck[]> {
     return this.saleTruckRepo.find({
       where: { sale_id: saleId },
       relations: ['truck', 'items'],
@@ -54,7 +55,7 @@ export class TrucksService {
   async markTruckReturned(
     truckId: number,
     returnedAt: Date,
-  ): Promise<SaleTruck> {
+  ): Promise<WatchmanLogTruck> {
     const saleTruck = await this.saleTruckRepo.findOne({
       where: { truck_id: truckId, status: 'pending' }, // or 
       relations: ['truck'],
@@ -77,7 +78,7 @@ export class TrucksService {
   async assignTrucksToSale(
     manager: EntityManager,
     saleId: number,
-    savedItems: SaleItem[],
+    savedItems: Watchman_Log_Item[],
     dtoItems: { dimension: string; quantity: number }[],
     trucks: CreateSaleTruckDto[],
     skipActiveCheck = false,
@@ -118,8 +119,8 @@ export class TrucksService {
       }
 
       const saleTruck = await manager.save(
-        SaleTruck,
-        manager.create(SaleTruck, {
+        WatchmanLogTruck,
+        manager.create(WatchmanLogTruck, {
           sale_id: saleId,
           truck_id: truckDto.truck_id,
           notes: truckDto.notes,
@@ -130,11 +131,11 @@ export class TrucksService {
       );
 
       await manager.save(
-        SaleTruckItem,
+        WatchmanLogTruckItem,
         truckDto.items.map(ti =>
-          manager.create(SaleTruckItem, {
-            sale_truck_id: saleTruck.id,
-            sale_item_id: savedItems[ti.sale_item_index].id,
+          manager.create(WatchmanLogTruckItem, {
+            watchmanlog_truck_id: saleTruck.id,
+            watchman_log_item_id: savedItems[ti.sale_item_index].id,
             quantity: ti.quantity,
             notes: ti.notes,
           }),
