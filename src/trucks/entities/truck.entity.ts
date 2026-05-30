@@ -1,6 +1,6 @@
 // truck.entity.ts
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, OneToMany } from 'typeorm';
-import { SaleTruck } from './sale-truck.entity';
+import {WatchmanLogTruck } from './watchmanlog-truck.entity';
 
 @Entity('trucks')
 export class Truck {
@@ -16,6 +16,6 @@ export class Truck {
   @Column({ default: true })
   is_active!: boolean;
 
-  @OneToMany(() => SaleTruck, st => st.truck)
-  saleTrucks!: SaleTruck[];
+  @OneToMany(() => WatchmanLogTruck, wlt => wlt.truck)
+  watchmanLogTrucks!: WatchmanLogTruck[];
 }

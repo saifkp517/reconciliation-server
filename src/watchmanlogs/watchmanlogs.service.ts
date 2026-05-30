@@ -6,10 +6,10 @@ import {
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, DataSource } from 'typeorm';
-import { Sale } from './entities/sale.entity';
-import { SaleItem } from './entities/sale-item.entity';
-import { SaleTruck } from '../trucks/entities/sale-truck.entity';
-import { SaleTruckItem } from '../trucks/entities/sale-truck-item.entity';
+import { Watchman_Logs } from './entities/watchman-log.entity';
+import { Watchman_Log_Item } from './entities/watchman-log-items.entity';
+import { WatchmanLogTruck } from '../trucks/entities/watchmanlog-truck.entity';
+import { WatchmanLogTruckItem } from '../trucks/entities/watchmanlog-truck-item.entity';
 import { Customer } from './entities/customer.entity';
 import { Truck } from '../trucks/entities/truck.entity';
 import { InventoryService } from '../inventory/inventory.service';
@@ -47,7 +47,7 @@ export class CreateCustomerDto {
   priceLists!: CreatePriceListDto[];
 }
 
-export interface CreateSaleDto {
+export interface CreateWatchmanLogDto {
   customer_id: number;
   sale_date: string;
   items: { dimension: string; quantity: number }[];
@@ -85,12 +85,12 @@ const ITEM_CATALOG: Record<string, { rate: number; purchase_rate: number; name: 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
 @Injectable()
-export class SalesService {
-  private readonly logger = new Logger(SalesService.name);
+export class WatchmanLogsService {
+  private readonly logger = new Logger(WatchmanLogsService.name);
 
   constructor(
-    @InjectRepository(Sale)
-    private readonly saleRepo: Repository<Sale>,
+    @InjectRepository(Watchman_Logs)
+    private readonly watchmanLogRepo: Repository<Watchman_Logs>,
     @InjectRepository(Customer)
     private readonly customerRepo: Repository<Customer>,
     @InjectRepository(CustomerPriceList)
@@ -157,7 +157,7 @@ export class SalesService {
 
   async getCustomer(id: number): Promise<Customer | null> {
     return this.customerRepo.findOne({
-      relations: { sales: true, priceLists: true },
+      relations: { watchmanLogs: true, priceLists: true },
       where: { id }
     })
   }
@@ -192,36 +192,32 @@ export class SalesService {
 
   // ─── Sales reads ────────────────────────────────────────────────────────
 
-  async getSaleById(id: number): Promise<Sale> {
-    const sale = await this.saleRepo.findOne({
+  async getWatchmanLogById(id: number): Promise<Watchman_Logs> {
+    const watchmanLog = await this.watchmanLogRepo.findOne({
       where: { id },
       relations: { customer: true, items: true, trucks: { truck: true, items: true } },
     });
-    if (!sale) throw new NotFoundException(`Sale #${id} not found`);
-    return sale;
+    if (!watchmanLog) throw new NotFoundException(`Watchman Log #${id} not found`);
+    return watchmanLog;
   }
 
-  async getAllSales(): Promise<Sale[]> {
-    return this.saleRepo.find({
+  async getAllWatchmanLogs(): Promise<Watchman_Logs[]> {
+    return this.watchmanLogRepo.find({
       relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
       order: { sale_date: 'DESC', id: 'DESC' },
     });
   }
 
-  // ─── createSale ──────────────────────────────────────────────────────────
+  // ─── createWatchmanLog ──────────────────────────────────────────────────
 
-  async createSale(dto: CreateSaleDto): Promise<Sale | null> {
+  async createWatchmanLog(dto: CreateWatchmanLogDto): Promise<Watchman_Logs | null> {
     return this.dataSource.transaction(async manager => {
       const { sale_date } = dto;
 
-      // ── Invoice number ──────────────────────────────────────────────────
-      const countToday = await manager.count(Sale, { where: { sale_date } });
-      const invoice_no = `INV-${sale_date.replace(/-/g, '')}-${String(countToday + 1).padStart(3, '0')}`;
-
-      // ── Sale header ─────────────────────────────────────────────────────
+      // ── Watchman Log header ─────────────────────────────────────────────
       const savedSale = await manager.save(
-        Sale,
-        manager.create(Sale, { customer_id: dto.customer_id, sale_date, invoice_no }),
+        Watchman_Logs,
+        manager.create(Watchman_Logs, { customer_id: dto.customer_id, sale_date }),
       );
 
       const normalizeItemName = (name: string) =>
@@ -241,7 +237,7 @@ export class SalesService {
 
       // ── Sale items ──────────────────────────────────────────────────────
       const savedItems = await manager.save(
-        SaleItem,
+        Watchman_Log_Item,
         dto.items.map(item => {
           const catalog = this.getItemByDimension(item.dimension);
           console.log({
@@ -252,8 +248,8 @@ export class SalesService {
 
           const unit_sp = customerPriceMap.get(normalizeItemName(catalog.name)) ?? catalog.rate;
 
-          return manager.create(SaleItem, {
-            sale_id: savedSale.id,
+          return manager.create(Watchman_Log_Item, {
+            watchman_log_id: savedSale.id,
             dimension: item.dimension,
             quantity: item.quantity,
             name: catalog.name,
@@ -268,7 +264,7 @@ export class SalesService {
       // ── Inventory deduction (inside tx — throws rolls everything back) ──
       await this.inventoryService.validateAndDeductStock(
         dto.items,
-        `Sale ${invoice_no}`,
+        `Sale ${savedSale.invoice_no}`,
         'watchman',
         manager,
       );
@@ -278,79 +274,8 @@ export class SalesService {
         await this.trucksService.assignTrucksToSale(manager, savedSale.id, savedItems, dto.items, dto.trucks);
       }
 
-      return manager.findOne(Sale, {
+      return manager.findOne(Watchman_Logs, {
         where: { id: savedSale.id },
-        relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
-      });
-    });
-  }
-  // ─── updateSale ──────────────────────────────────────────────────────────
-
-  async updateSale(id: number, dto: Partial<CreateSaleDto>): Promise<Sale | null> {
-    return this.dataSource.transaction(async manager => {
-      const sale = await manager.findOne(Sale, { where: { id }, relations: ['items'] });
-      if (!sale) throw new NotFoundException(`Sale #${id} not found`);
-
-      // ── Header ──────────────────────────────────────────────────────────
-      const patch: Partial<Sale> = {};
-      if (dto.customer_id) patch.customer_id = dto.customer_id;
-      if (dto.sale_date) patch.sale_date = dto.sale_date;
-      if (Object.keys(patch).length) await manager.update(Sale, id, patch);
-
-      // ── Items ───────────────────────────────────────────────────────────
-      let currentItems: SaleItem[] = sale.items;
-
-      if (dto.items) {
-        // wipe truck assignments that reference old sale_items
-        const oldItemIds = sale.items.map(i => i.id);
-        if (oldItemIds.length) {
-          await manager
-            .createQueryBuilder()
-            .delete()
-            .from('sale_truck_items')
-            .where('sale_item_id IN (:...ids)', { ids: oldItemIds })
-            .execute();
-        }
-        await manager.createQueryBuilder().delete().from('sale_trucks').where('sale_id = :id', { id }).execute();
-        await manager.delete(SaleItem, { sale_id: id });
-
-        currentItems = await manager.save(
-          SaleItem,
-          dto.items.map(item => {
-            const catalog = this.getItemByDimension(item.dimension);
-            return manager.create(SaleItem, {
-              sale_id: id,
-              dimension: item.dimension,
-              quantity: item.quantity,
-              name: catalog.name,
-              unit_sp: catalog.rate,
-              line_sp: catalog.rate * item.quantity,
-            });
-          }),
-        );
-      }
-
-      // ── Trucks ──────────────────────────────────────────────────────────
-      if (dto.trucks) {
-        if (!dto.items) {
-          // trucks-only update — wipe existing assignments first
-          const oldItemIds = sale.items.map(i => i.id);
-          if (oldItemIds.length) {
-            await manager
-              .createQueryBuilder()
-              .delete()
-              .from('sale_truck_items')
-              .where('sale_item_id IN (:...ids)', { ids: oldItemIds })
-              .execute();
-          }
-          await manager.createQueryBuilder().delete().from('sale_trucks').where('sale_id = :id', { id }).execute();
-        }
-
-        await this.trucksService.assignTrucksToSale(manager, id, currentItems, dto.items ?? sale.items.map(i => ({ dimension: i.dimension, quantity: i.quantity })), dto.trucks, true);
-      }
-
-      return manager.findOne(Sale, {
-        where: { id },
         relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
       });
     });

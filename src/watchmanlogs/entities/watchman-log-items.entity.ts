@@ -2,19 +2,19 @@ import {
   Entity, PrimaryGeneratedColumn, Column,
   ManyToOne, JoinColumn,
 } from 'typeorm';
-import { Sale } from './sale.entity';
+import { Watchman_Logs } from './watchman-log.entity';
 
-@Entity('sale_items')
-export class SaleItem {
+@Entity('watchman_log_items')
+export class Watchman_Log_Item {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ name: 'sale_id' })
-  sale_id!: number;
+  @Column({ name: 'watchman_log_id' })
+  watchman_log_id!: number;
 
-  @ManyToOne(() => Sale, sale => sale.items)
-  @JoinColumn({ name: 'sale_id' })
-  sale!: Sale;
+  @ManyToOne(() => Watchman_Logs, watchmanLog => watchmanLog.items)
+  @JoinColumn({ name: 'watchman_log_id' })
+  watchman_log!: Watchman_Logs;
 
   @Column({ type: 'varchar', nullable: true })
   dimension!: string;
