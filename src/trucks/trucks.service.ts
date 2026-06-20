@@ -24,9 +24,8 @@ export class TrucksService {
   }
 
   async getActiveTrucks(): Promise<Truck[]> {
-    // active = busy
     return this.truckRepo.find({
-      where: { is_available: true },
+      where: { is_available: false },
       order: { id: 'ASC' },
     });
   }
@@ -42,9 +41,8 @@ export class TrucksService {
   }
 
   async getInactiveTrucks(): Promise<Truck[]> {
-    // inactive = available
     return this.truckRepo.find({
-      where: { is_available: false },
+      where: { is_available: true },
       order: { id: 'ASC' },
     });
   }
@@ -74,7 +72,7 @@ export class TrucksService {
 
     await this.saleTruckRepo.save(saleTruck);
 
-    await this.truckRepo.update(truckId, { is_available: false });
+    await this.truckRepo.update(truckId, { is_available: true });
 
     return saleTruck;
   }
@@ -134,7 +132,7 @@ export class TrucksService {
       const truck = await manager.findOne(Truck, {
         where: {
           id: truckDto.truck_id,
-          ...(skipActiveCheck ? {} : { is_available: false }),
+          ...(skipActiveCheck ? {} : { is_available: true }),
         },
       });
       if (!truck) {
@@ -143,7 +141,7 @@ export class TrucksService {
         );
       }
 
-      await manager.update(Truck, truckDto.truck_id, { is_available: true });
+      await manager.update(Truck, truckDto.truck_id, { is_available: false });
 
       for (const ti of truckDto.items) {
         const saleItem = dtoItems[ti.sale_item_index];
