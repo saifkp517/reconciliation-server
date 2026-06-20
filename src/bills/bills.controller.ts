@@ -1,5 +1,5 @@
-import { Body, Controller, Get, Param, ParseIntPipe, Post } from '@nestjs/common';
-import { BillsService } from './bills.service';
+import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
+import { BillsService, RecordPaymentDto } from './bills.service';
 import { CreateBillDto } from './entities/create-bill.dto';
 
 @Controller('bills')
@@ -16,13 +16,27 @@ export class BillsController {
     return this.billsService.findAll();
   }
 
+  // Must come before :id to avoid being swallowed by the dynamic segment
+  @Get('price-list/:customerId')
+  getPriceList(@Param('customerId', ParseIntPipe) customerId: number) {
+    return this.billsService.getPriceListByCustomer(customerId);
+  }
+
+  @Get('customer/:customerId/outstanding')
+  getCustomerOutstanding(@Param('customerId', ParseIntPipe) customerId: number) {
+    return this.billsService.getCustomerOutstanding(customerId);
+  }
+
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.billsService.findOne(id);
   }
 
-  @Get('price-list/:customerId')
-  getPriceList(@Param('customerId', ParseIntPipe) customerId: number) {
-    return this.billsService.getPriceListByCustomer(customerId);
+  @Patch(':id')
+  recordPayment(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() dto: RecordPaymentDto,
+  ) {
+    return this.billsService.recordPayment(id, dto);
   }
 }

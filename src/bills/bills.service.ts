@@ -1,11 +1,17 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
-import { Bill } from './entities/bill.entity';
+import { Bill, PaymentStatus } from './entities/bill.entity';
 import { BillItem } from './entities/bill-item.entity';
 import { CustomerPriceList } from '../watchmanlogs/entities/customer_pricelist.entity';
 import { InventoryItem, InventoryItemName } from '../inventory/entities/inventory_items.entity';
 import { CreateBillDto } from './entities/create-bill.dto';
+
+export class RecordPaymentDto {
+  paid_amount!: number;
+  payment_status!: PaymentStatus;
+  payment_date!: string;
+}
 
 @Injectable()
 export class BillsService {
@@ -108,10 +114,15 @@ export class BillsService {
         });
       }
 
+      // ── Compute due date (7 days from bill_date) ─────────────────────────
+      const due = new Date(bill_date);
+      due.setDate(due.getDate() + 7);
+      const due_date = due.toISOString().slice(0, 10);
+
       // ── Save bill header ─────────────────────────────────────────────────
       const savedBill = await manager.save(
         Bill,
-        manager.create(Bill, { customer_id, bill_date }),
+        manager.create(Bill, { customer_id, bill_date, due_date }),
       );
 
       // ── Save bill items ──────────────────────────────────────────────────
@@ -148,9 +159,50 @@ export class BillsService {
     return bill;
   }
 
+  async recordPayment(id: number, dto: RecordPaymentDto): Promise<Bill> {
+    const repo = this.dataSource.getRepository(Bill);
+    const bill = await repo.findOne({ where: { id }, relations: ['items', 'customer'] });
+
+    if (!bill) throw new NotFoundException(`Bill #${id} not found`);
+
+    bill.paid_amount = dto.paid_amount;
+    bill.payment_status = dto.payment_status;
+    bill.payment_date = dto.payment_date;
+
+    return repo.save(bill);
+  }
+
   async getPriceListByCustomer(customerId: number): Promise<CustomerPriceList[]> {
     return this.dataSource.getRepository(CustomerPriceList).find({
       where: { customer: { id: customerId } },
     });
+  }
+
+  async getCustomerOutstanding(customerId: number) {
+    const repo = this.dataSource.getRepository(Bill);
+
+    const bills = await repo.find({
+      where: [
+        { customer_id: customerId, payment_status: PaymentStatus.OUTSTANDING },
+        { customer_id: customerId, payment_status: PaymentStatus.PARTIAL },
+      ],
+      relations: ['items'],
+      order: { due_date: 'ASC' },
+    });
+
+    const summary = bills.map(bill => ({
+      bill_id: bill.id,
+      invoice_no: bill.invoice_no,
+      bill_date: bill.bill_date,
+      due_date: bill.due_date,
+      payment_status: bill.payment_status,
+      total_amount: bill.totalAmount,
+      paid_amount: Number(bill.paid_amount),
+      outstanding_amount: bill.totalAmount - Number(bill.paid_amount),
+    }));
+
+    const total_outstanding = summary.reduce((sum, b) => sum + b.outstanding_amount, 0);
+
+    return { customer_id: customerId, total_outstanding, bills: summary };
   }
 }

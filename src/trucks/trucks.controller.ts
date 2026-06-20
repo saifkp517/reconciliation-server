@@ -1,9 +1,14 @@
-import { Controller, Get, Patch, Param, Body, Query } from "@nestjs/common";
+import { Controller, Get, Patch, Post, Param, Body, Query } from "@nestjs/common";
 import { TrucksService } from "./trucks.service";
 
 @Controller('trucks')
 export class TrucksController {
   constructor(private readonly trucksService: TrucksService) { }
+
+  @Get()
+  getAllTrucks() {
+    return this.trucksService.getAllTrucks();
+  }
 
   @Get('active')
   getActive() {
@@ -40,6 +45,33 @@ export class TrucksController {
     toDate.setHours(23, 59, 59, 999);
 
     return this.trucksService.getTruckTimeline(fromDate, toDate);
+  }
+
+  @Post()
+  addTruck(@Body() body: {
+    registration_no: string;
+    is_available?: boolean;
+    mv_tax_renewal_date?: string;
+    vehicle_fitness_renewal_date?: string;
+    insurance_expiry_renewal_date?: string;
+    vehicle_pucc_renewal_date?: string;
+  }) {
+    return this.trucksService.addTruck(body);
+  }
+
+  @Patch(':id')
+  editTruck(
+    @Param('id') id: number,
+    @Body() body: {
+      registration_no?: string;
+      is_available?: boolean;
+      mv_tax_renewal_date?: string;
+      vehicle_fitness_renewal_date?: string;
+      insurance_expiry_renewal_date?: string;
+      vehicle_pucc_renewal_date?: string;
+    },
+  ) {
+    return this.trucksService.editTruck(Number(id), body);
   }
 
   @Get('timeline/report')

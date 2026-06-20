@@ -31,6 +31,18 @@ export class InventoryService {
     await this.store.syncManufacture(dto.dimension, dto.amount, dto.cementBagsUsed, loggedBy);
   }
 
+  async createItem(name: string, unit?: string, price?: number) {
+    return this.store.createItem(name, unit, price);
+  }
+
+  async setQuantity(id: number, quantity: number, loggedBy?: string) {
+    return this.store.setQuantityById(id, quantity, loggedBy);
+  }
+
+  async setPrice(id: number, price: number) {
+    return this.store.setPriceById(id, price);
+  }
+
   async addCementStock(amount: number): Promise<void> {
     await this.store.syncCementPurchase(amount, 'manager');
   }

@@ -20,14 +20,17 @@ export class InventoryItem {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  @Column({ type: 'enum', enum: InventoryItemName, unique: true })
-  name!: InventoryItemName;
+  @Column({ type: 'varchar', length: 100, unique: true })
+  name!: string;
 
   /**
    * Human-readable label, e.g. "BLOCK 4 inches"
    */
   @Column({ type: 'varchar' })
   label!: string;
+
+  @Column({ type: 'varchar', length: 50, nullable: true })
+  unit!: string | null;
 
   /**
    * Running stock total. Always kept in sync by InventoryStoreService.

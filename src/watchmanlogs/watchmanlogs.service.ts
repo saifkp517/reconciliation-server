@@ -18,7 +18,7 @@ import { CustomerPriceList } from './entities/customer_pricelist.entity';
 import { InventoryItemName } from '../inventory/entities/inventory_items.entity';
 import { DIMENSION_TO_ITEM_NAME } from '../inventory/inventory_store.service';
 import { Type } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsNumber, IsString, Min, ValidateNested, ArrayNotEmpty, IsArray } from 'class-validator';
+import { IsEnum, IsNotEmpty, IsNumber, IsString, IsOptional, Min, ValidateNested, ArrayNotEmpty, IsArray } from 'class-validator';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -37,8 +37,8 @@ export class CreateCustomerDto {
   name!: string;
 
   @IsString()
-  @IsNotEmpty()
-  phone!: string;
+  @IsOptional()
+  phone?: string;
 
   @IsArray()
   @ArrayNotEmpty()
@@ -165,9 +165,12 @@ export class WatchmanLogsService {
   async createCustomer(data: CreateCustomerDto): Promise<Customer | null> {
     const { name, phone, priceLists } = data;
 
-    const existing = await this.customerRepo.findOne({ where: { phone } });
-    if (existing) {
-      throw new BadRequestException(`A customer with phone ${phone} already exists.`);
+    // Only check for existing phone if phone is provided and not empty
+    if (phone && phone.trim()) {
+      const existing = await this.customerRepo.findOne({ where: { phone } });
+      if (existing) {
+        throw new BadRequestException(`A customer with phone ${phone} already exists.`);
+      }
     }
 
     const customer = await this.customerRepo.save(

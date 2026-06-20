@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Body, Patch, Param } from '@nestjs/common';
+import { Controller, Get, Post, Body, Patch, Param, ParseIntPipe } from '@nestjs/common';
 import { WatchmanLogsService } from './watchmanlogs.service';
 import type { CreateWatchmanLogDto, UpdateCustomerDto } from './watchmanlogs.service';
 import { InventoryItemName } from '../inventory/entities/inventory_items.entity';
@@ -48,7 +48,7 @@ export class WatchmanLogsController {
   }
 
   @Get(':id')
-  getWatchmanLogById(@Param('id') id: string) {
-    return this.watchmanLogsService.getWatchmanLogById(Number(id));
+  getWatchmanLogById(@Param('id', ParseIntPipe) id: number) {
+    return this.watchmanLogsService.getWatchmanLogById(id);
   }
 }

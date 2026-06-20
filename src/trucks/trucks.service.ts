@@ -19,10 +19,14 @@ export class TrucksService {
     private saleTruckRepo: Repository<WatchmanLogTruck>,
   ) { }
 
+  async getAllTrucks(): Promise<Truck[]> {
+    return this.truckRepo.find();
+  }
+
   async getActiveTrucks(): Promise<Truck[]> {
     // active = busy
     return this.truckRepo.find({
-      where: { is_active: true },
+      where: { is_available: true },
       order: { id: 'ASC' },
     });
   }
@@ -40,7 +44,7 @@ export class TrucksService {
   async getInactiveTrucks(): Promise<Truck[]> {
     // inactive = available
     return this.truckRepo.find({
-      where: { is_active: false },
+      where: { is_available: false },
       order: { id: 'ASC' },
     });
   }
@@ -70,9 +74,52 @@ export class TrucksService {
 
     await this.saleTruckRepo.save(saleTruck);
 
-    await this.truckRepo.update(truckId, { is_active: false });
+    await this.truckRepo.update(truckId, { is_available: false });
 
     return saleTruck;
+  }
+
+  async addTruck(data: {
+    registration_no: string;
+    is_available?: boolean;
+    mv_tax_renewal_date?: string;
+    vehicle_fitness_renewal_date?: string;
+    insurance_expiry_renewal_date?: string;
+    vehicle_pucc_renewal_date?: string;
+  }): Promise<Truck> {
+    const truck = this.truckRepo.create({
+      ...data,
+      mv_tax_renewal_date: data.mv_tax_renewal_date ? new Date(data.mv_tax_renewal_date) : null,
+      vehicle_fitness_renewal_date: data.vehicle_fitness_renewal_date ? new Date(data.vehicle_fitness_renewal_date) : null,
+      insurance_expiry_renewal_date: data.insurance_expiry_renewal_date ? new Date(data.insurance_expiry_renewal_date) : null,
+      vehicle_pucc_renewal_date: data.vehicle_pucc_renewal_date ? new Date(data.vehicle_pucc_renewal_date) : null,
+    });
+    return this.truckRepo.save(truck);
+  }
+
+  async editTruck(
+    id: number,
+    data: {
+      registration_no?: string;
+      is_available?: boolean;
+      mv_tax_renewal_date?: string;
+      vehicle_fitness_renewal_date?: string;
+      insurance_expiry_renewal_date?: string;
+      vehicle_pucc_renewal_date?: string;
+    },
+  ): Promise<Truck> {
+    const truck = await this.truckRepo.findOne({ where: { id } });
+    if (!truck) throw new BadRequestException(`Truck ${id} not found`);
+
+    Object.assign(truck, {
+      ...data,
+      ...(data.mv_tax_renewal_date !== undefined && { mv_tax_renewal_date: data.mv_tax_renewal_date ? new Date(data.mv_tax_renewal_date) : null }),
+      ...(data.vehicle_fitness_renewal_date !== undefined && { vehicle_fitness_renewal_date: data.vehicle_fitness_renewal_date ? new Date(data.vehicle_fitness_renewal_date) : null }),
+      ...(data.insurance_expiry_renewal_date !== undefined && { insurance_expiry_renewal_date: data.insurance_expiry_renewal_date ? new Date(data.insurance_expiry_renewal_date) : null }),
+      ...(data.vehicle_pucc_renewal_date !== undefined && { vehicle_pucc_renewal_date: data.vehicle_pucc_renewal_date ? new Date(data.vehicle_pucc_renewal_date) : null }),
+    });
+
+    return this.truckRepo.save(truck);
   }
 
   async assignTrucksToSale(
@@ -87,7 +134,7 @@ export class TrucksService {
       const truck = await manager.findOne(Truck, {
         where: {
           id: truckDto.truck_id,
-          ...(skipActiveCheck ? {} : { is_active: false }),
+          ...(skipActiveCheck ? {} : { is_available: false }),
         },
       });
       if (!truck) {
@@ -96,7 +143,7 @@ export class TrucksService {
         );
       }
 
-      await manager.update(Truck, truckDto.truck_id, { is_active: true });
+      await manager.update(Truck, truckDto.truck_id, { is_available: true });
 
       for (const ti of truckDto.items) {
         const saleItem = dtoItems[ti.sale_item_index];

@@ -1,4 +1,4 @@
-import { IsInt, IsString, IsIn, Min } from 'class-validator';
+import { IsInt, IsString, IsIn, IsOptional, IsNumber, IsPositive, Min } from 'class-validator';
 
 export const VALID_DIMENSIONS = [
   'BLOCK 4 inches',
@@ -48,4 +48,30 @@ export class AddCementBagsDto {
   @IsInt()
   @Min(1)
   amount!: number;
+}
+
+export class CreateItemDto {
+  @IsString()
+  name!: string;
+
+  @IsOptional()
+  @IsString()
+  unit?: string;
+
+  @IsOptional()
+  @IsNumber()
+  @IsPositive()
+  price?: number;
+}
+
+export class SetQuantityDto {
+  @IsInt()
+  @Min(0)
+  quantity!: number;
+}
+
+export class SetPriceDto {
+  @IsNumber()
+  @IsPositive()
+  price!: number;
 }

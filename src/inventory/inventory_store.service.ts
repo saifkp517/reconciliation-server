@@ -3,6 +3,7 @@ import {
     Logger,
     NotFoundException,
     BadRequestException,
+    ConflictException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { DataSource, EntityManager, Repository } from 'typeorm';
@@ -182,6 +183,56 @@ export class InventoryStoreService {
 
     async getAllItems(): Promise<InventoryItem[]> {
         return this.itemRepo.find({ order: { name: 'ASC' } });
+    }
+
+    async createItem(name: string, unit?: string, price?: number): Promise<InventoryItem> {
+        const existing = await this.itemRepo.findOne({ where: { name } });
+        if (existing) throw new ConflictException('ITEM_ALREADY_EXISTS');
+
+        const item = this.itemRepo.create({
+            name,
+            label: name,
+            unit: unit ?? null,
+            unitPrice: price ?? 0,
+            stock: 0,
+        });
+        return this.itemRepo.save(item);
+    }
+
+    async setQuantityById(id: number, newQty: number, loggedBy?: string): Promise<InventoryItem> {
+        return this.dataSource.transaction('SERIALIZABLE', async (manager) => {
+            const item = await manager
+                .getRepository(InventoryItem)
+                .createQueryBuilder('item')
+                .setLock('pessimistic_write')
+                .where('item.id = :id', { id })
+                .getOne();
+
+            if (!item) throw new NotFoundException(`Inventory item not found: ${id}`);
+
+            const delta = newQty - Number(item.stock);
+            item.stock = newQty;
+            await manager.save(InventoryItem, item);
+
+            const tx = manager.getRepository(InventoryTransaction).create({
+                itemId: item.id,
+                quantityDelta: delta,
+                stockAfter: newQty,
+                reason: TransactionReason.ADJUSTMENT,
+                notes: null,
+                loggedBy: loggedBy ?? null,
+            });
+            await manager.save(InventoryTransaction, tx);
+
+            return item;
+        });
+    }
+
+    async setPriceById(id: number, price: number): Promise<InventoryItem> {
+        const item = await this.itemRepo.findOne({ where: { id } });
+        if (!item) throw new NotFoundException(`Inventory item not found: ${id}`);
+        item.unitPrice = price;
+        return this.itemRepo.save(item);
     }
 
     async getProdutionLogs() {
