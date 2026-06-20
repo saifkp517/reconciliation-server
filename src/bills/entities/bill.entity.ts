@@ -12,6 +12,12 @@ import {
 import { Customer } from '../../watchmanlogs/entities/customer.entity';
 import { BillItem } from './bill-item.entity';
 
+export enum PaymentStatus {
+  OUTSTANDING = 'OUTSTANDING',
+  PARTIAL = 'PARTIAL',
+  PAID = 'PAID',
+}
+
 @Entity('bills')
 export class Bill {
   @PrimaryGeneratedColumn()
@@ -25,6 +31,22 @@ export class Bill {
 
   @Column({ type: 'date' })
   bill_date!: string;
+
+  @Column({ type: 'date', nullable: true })
+  due_date!: string | null;
+
+  @Column({
+    type: 'enum',
+    enum: PaymentStatus,
+    default: PaymentStatus.OUTSTANDING,
+  })
+  payment_status!: PaymentStatus;
+
+  @Column({ type: 'numeric', default: 0 })
+  paid_amount!: number;
+
+  @Column({ type: 'date', nullable: true })
+  payment_date!: string | null;
 
   @CreateDateColumn()
   created_at!: Date;
