@@ -64,13 +64,6 @@ export class InventoryStoreService {
 
                 const newStock = Number(item.stock) + delta;
 
-                if (newStock < 0) {
-                    throw new BadRequestException(
-                        `Insufficient stock for ${item.name}. ` +
-                        `Available: ${item.stock}, requested: ${Math.abs(delta)}`,
-                    );
-                }
-
                 item.stock = newStock;
                 await manager.save(InventoryItem, item);
 
