@@ -38,6 +38,22 @@ export class CreateBillDto {
   @IsDateString()
   bill_date!: string;
 
+  @IsString()
+  @IsOptional()
+  billing_address?: string;
+
+  @IsString()
+  @IsOptional()
+  billing_city?: string;
+
+  @IsString()
+  @IsOptional()
+  billing_state?: string;
+
+  @IsString()
+  @IsOptional()
+  billing_pincode?: string;
+
   @IsArray()
   @ValidateNested({ each: true })
   @Type(() => CreateBillItemDto)

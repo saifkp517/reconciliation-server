@@ -5,6 +5,7 @@ import { Bill, PaymentStatus } from './entities/bill.entity';
 import { BillItem } from './entities/bill-item.entity';
 import { CustomerPriceList } from '../watchmanlogs/entities/customer_pricelist.entity';
 import { InventoryItem, InventoryItemName } from '../inventory/entities/inventory_items.entity';
+import { Customer } from '../watchmanlogs/entities/customer.entity';
 import { CreateBillDto } from './entities/create-bill.dto';
 
 export class RecordPaymentDto {
@@ -35,9 +36,12 @@ export class BillsService {
 
   async createBill(dto: CreateBillDto): Promise<Bill | null> {
     return this.dataSource.transaction(async manager => {
-      const { customer_id, bill_date, items } = dto;
+      const { customer_id, bill_date, items, billing_address, billing_city, billing_state, billing_pincode } = dto;
 
-      // ── Fetch customer price list (keyed by itemName enum) ───────────────
+      // ── Fetch customer (for address fallback) + price list ───────────────
+      const customer = await manager.findOne(Customer, { where: { id: customer_id } });
+      if (!customer) throw new NotFoundException(`Customer #${customer_id} not found`);
+
       const existingPrices = await manager.find(CustomerPriceList, {
         where: { customer: { id: customer_id } },
       });
@@ -122,7 +126,15 @@ export class BillsService {
       // ── Save bill header ─────────────────────────────────────────────────
       const savedBill = await manager.save(
         Bill,
-        manager.create(Bill, { customer_id, bill_date, due_date }),
+        manager.create(Bill, {
+          customer_id,
+          bill_date,
+          due_date,
+          billing_address: billing_address ?? customer.address ?? null,
+          billing_city: billing_city ?? null,
+          billing_state: billing_state ?? null,
+          billing_pincode: billing_pincode ?? null,
+        }),
       );
 
       // ── Save bill items ──────────────────────────────────────────────────

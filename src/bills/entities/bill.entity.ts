@@ -48,6 +48,18 @@ export class Bill {
   @Column({ type: 'date', nullable: true })
   payment_date!: string | null;
 
+  @Column({ type: 'text', nullable: true })
+  billing_address!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  billing_city!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  billing_state!: string | null;
+
+  @Column({ type: 'varchar', nullable: true })
+  billing_pincode!: string | null;
+
   @CreateDateColumn()
   created_at!: Date;
 
