@@ -12,10 +12,49 @@ export class Customer {
   name!: string;
 
   @Column({ nullable: true })
-  phone!: string;
+  phone?: string;
 
   @Column({ nullable: true })
-  address!: string;
+  mobile?: string;
+
+  @Column({ nullable: true })
+  email?: string;
+
+  @Column({ nullable: true })
+  company_name?: string;
+
+  @Column({ nullable: true })
+  customer_type?: string;
+
+  @Column({ nullable: true })
+  gst_treatment?: string;
+
+  @Column({ nullable: true })
+  gstin?: string;
+
+  @Column({ nullable: true })
+  pan?: string;
+
+  @Column({ nullable: true })
+  address?: string;
+
+  @Column({ nullable: true })
+  shipping_address?: string;
+
+  @Column({ type: 'double precision', nullable: true })
+  billing_lat?: number;
+
+  @Column({ type: 'double precision', nullable: true })
+  billing_lng?: number;
+
+  @Column({ type: 'double precision', nullable: true })
+  shipping_lat?: number;
+
+  @Column({ type: 'double precision', nullable: true })
+  shipping_lng?: number;
+
+  @Column({ type: 'text', nullable: true })
+  notes?: string;
 
   @CreateDateColumn()
   created_at!: Date;

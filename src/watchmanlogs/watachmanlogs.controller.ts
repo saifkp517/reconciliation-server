@@ -1,6 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, ParseIntPipe } from '@nestjs/common';
 import { WatchmanLogsService } from './watchmanlogs.service';
 import type { CreateWatchmanLogDto, UpdateCustomerDto } from './watchmanlogs.service';
+import { CreateCustomerDto } from './watchmanlogs.service';
 import { InventoryItemName } from '../inventory/entities/inventory_items.entity';
 
 @Controller('watchmanlogs')
@@ -25,12 +26,8 @@ export class WatchmanLogsController {
   }
 
   @Post('customer')
-  async createCustomer(@Body() body: any) {
-    return this.watchmanLogsService.createCustomer({
-      name: body.name,
-      phone: body.phone,
-      priceLists: body.priceLists || [],
-    });
+  async createCustomer(@Body() body: CreateCustomerDto) {
+    return this.watchmanLogsService.createCustomer(body);
   }
 
   @Patch('customer/:id')

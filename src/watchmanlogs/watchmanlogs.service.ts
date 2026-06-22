@@ -40,11 +40,67 @@ export class CreateCustomerDto {
   @IsOptional()
   phone?: string;
 
+  @IsString()
+  @IsOptional()
+  mobile?: string;
+
+  @IsString()
+  @IsOptional()
+  email?: string;
+
+  @IsString()
+  @IsOptional()
+  company_name?: string;
+
+  @IsString()
+  @IsOptional()
+  customer_type?: string;
+
+  @IsString()
+  @IsOptional()
+  gst_treatment?: string;
+
+  @IsString()
+  @IsOptional()
+  gstin?: string;
+
+  @IsString()
+  @IsOptional()
+  pan?: string;
+
+  @IsString()
+  @IsOptional()
+  address?: string;
+
+  @IsString()
+  @IsOptional()
+  shipping_address?: string;
+
+  @IsNumber()
+  @IsOptional()
+  billing_lat?: number;
+
+  @IsNumber()
+  @IsOptional()
+  billing_lng?: number;
+
+  @IsNumber()
+  @IsOptional()
+  shipping_lat?: number;
+
+  @IsNumber()
+  @IsOptional()
+  shipping_lng?: number;
+
+  @IsString()
+  @IsOptional()
+  notes?: string;
+
   @IsArray()
-  @ArrayNotEmpty()
+  @IsOptional()
   @ValidateNested({ each: true })
   @Type(() => CreatePriceListDto)
-  priceLists!: CreatePriceListDto[];
+  priceLists?: CreatePriceListDto[];
 }
 
 export interface CreateWatchmanLogDto {
@@ -71,6 +127,7 @@ export interface CreateSaleTruckDto {
 export class UpdateCustomerDto {
   name?: string;
   phone?: string;
+  address?: string;
   prices?: Partial<Record<InventoryItemName, number>>;
 }
 
@@ -163,29 +220,29 @@ export class WatchmanLogsService {
   }
 
   async createCustomer(data: CreateCustomerDto): Promise<Customer | null> {
-    const { name, phone, priceLists } = data;
+    const { priceLists, ...customerFields } = data;
 
-    // Only check for existing phone if phone is provided and not empty
-    if (phone && phone.trim()) {
-      const existing = await this.customerRepo.findOne({ where: { phone } });
+    if (customerFields.phone && customerFields.phone.trim()) {
+      const existing = await this.customerRepo.findOne({ where: { phone: customerFields.phone } });
       if (existing) {
-        throw new BadRequestException(`A customer with phone ${phone} already exists.`);
+        throw new BadRequestException(`A customer with phone ${customerFields.phone} already exists.`);
       }
     }
 
     const customer = await this.customerRepo.save(
-      this.customerRepo.create({ name, phone })
+      this.customerRepo.create(customerFields)
     );
 
-    const priceEntities = priceLists.map((entry) =>
-      this.priceListRepo.create({
-        customer,
-        itemName: entry.itemName,
-        price: entry.price,
-      })
-    );
-
-    await this.priceListRepo.save(priceEntities);
+    if (priceLists?.length) {
+      const priceEntities = priceLists.map((entry) =>
+        this.priceListRepo.create({
+          customer,
+          itemName: entry.itemName,
+          price: entry.price,
+        })
+      );
+      await this.priceListRepo.save(priceEntities);
+    }
 
     return this.customerRepo.findOne({
       where: { id: customer.id },
