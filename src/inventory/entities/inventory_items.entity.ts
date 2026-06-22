@@ -8,13 +8,6 @@ import {
 } from 'typeorm';
 import { InventoryTransaction } from './inventory_transactions.entity';
 
-export enum InventoryItemName {
-  CEMENT_BAGS = 'CEMENT_BAGS',
-  BLOCK_4_INCHES = 'BLOCK_4_INCHES',
-  BLOCK_6_INCHES = 'BLOCK_6_INCHES',
-  BLOCK_8_INCHES = 'BLOCK_8_INCHES',
-}
-
 @Entity('inventory_items')
 export class InventoryItem {
   @PrimaryGeneratedColumn()
@@ -23,13 +16,7 @@ export class InventoryItem {
   @Column({ type: 'varchar', length: 100, unique: true })
   name!: string;
 
-  /**
-   * Human-readable label, e.g. "BLOCK 4 inches"
-   */
-  @Column({ type: 'varchar' })
-  label!: string;
-
-  @Column({ type: 'varchar', length: 50, nullable: true })
+@Column({ type: 'varchar', length: 50, nullable: true })
   unit!: string | null;
 
   /**

@@ -4,14 +4,10 @@ import {
   IsEnum, IsInt, IsNotEmpty, IsOptional,
   IsString, ValidateNested, ArrayMinSize, IsArray,
 } from 'class-validator';
-import { type TransactionType } from './inventory.dto';
-import { type InventoryKey } from './inventory.dto';
-
-
 export class ChallanItemDto {
   @IsString()
   @IsNotEmpty()
-  inventory_key!: InventoryKey;
+  inventory_key!: string;
 
   @IsInt()
   @IsNotEmpty()
@@ -20,7 +16,7 @@ export class ChallanItemDto {
 
 export class CreateDeliveryChallanDto {
   @IsEnum(['PRODUCTION', 'DELIVERY', 'PURCHASE', 'ADJUSTMENT'])
-  transaction_type!: TransactionType;
+  transaction_type!: string;
 
   @IsOptional()
   @IsString()

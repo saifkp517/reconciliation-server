@@ -1,7 +1,6 @@
 import { Controller, Post, Get, Body, Param, ParseIntPipe, HttpCode, HttpStatus, Patch } from '@nestjs/common';
 import { InventoryService } from './inventory.service';
 import { AddBlockStockDto, AddCementBagsDto, CreateItemDto, SetQuantityDto, SetPriceDto } from './dto/inventory.dto';
-import { InventoryItemName } from './entities/inventory_items.entity';
 
 @Controller('inventory')
 export class InventoryController {
@@ -18,7 +17,7 @@ export class InventoryController {
   }
 
   @Get('stock/:name')
-  getStock(@Param('name') name: InventoryItemName) {
+  getStock(@Param('name') name: string) {
     return this.inventoryService.getStock(name);
   }
 

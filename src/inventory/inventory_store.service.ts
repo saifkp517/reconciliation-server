@@ -11,15 +11,7 @@ import { InventoryTransaction } from './entities/inventory_transactions.entity';
 import { InventoryItem } from './entities/inventory_items.entity';
 import { Expense } from './entities/expense.entity';
 import { TransactionReason } from './entities/inventory_transactions.entity';
-import { InventoryItemName } from './entities/inventory_items.entity';
-
-// ─── Catalog helpers (mirrors old Zoho constants) ─────────────────────────────
-
-export const DIMENSION_TO_ITEM_NAME: Record<string, InventoryItemName> = {
-    'BLOCK 4 inches': InventoryItemName.BLOCK_4_INCHES,
-    'BLOCK 6 inches': InventoryItemName.BLOCK_6_INCHES,
-    'BLOCK 8 inches': InventoryItemName.BLOCK_8_INCHES,
-};
+const CEMENT_ITEM_NAME = 'CEMENT BAGS';
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -42,16 +34,10 @@ export class InventoryStoreService {
 
     // ─── Internal helpers ────────────────────────────────────────────────────
 
-    private async findItemByName(name: InventoryItemName): Promise<InventoryItem> {
+    private async findItemByName(name: string): Promise<InventoryItem> {
         const item = await this.itemRepo.findOne({ where: { name } });
         if (!item) throw new NotFoundException(`Inventory item not found: ${name}`);
         return item;
-    }
-
-    private dimensionToItemName(dimension: string): InventoryItemName {
-        const name = DIMENSION_TO_ITEM_NAME[dimension];
-        if (!name) throw new BadRequestException(`Unknown block dimension: ${dimension}`);
-        return name;
     }
 
     /**
@@ -59,7 +45,7 @@ export class InventoryStoreService {
      * concurrent requests can't produce a negative stock race condition.
      */
     private async applyAdjustments(
-        adjustments: { itemName: InventoryItemName; delta: number }[],
+        adjustments: { itemName: string; delta: number }[],
         reason: TransactionReason,
         notes?: string,
         loggedBy?: string,
@@ -80,7 +66,7 @@ export class InventoryStoreService {
 
                 if (newStock < 0) {
                     throw new BadRequestException(
-                        `Insufficient stock for ${item.label}. ` +
+                        `Insufficient stock for ${item.name}. ` +
                         `Available: ${item.stock}, requested: ${Math.abs(delta)}`,
                     );
                 }
@@ -99,7 +85,7 @@ export class InventoryStoreService {
                 await manager.save(InventoryTransaction, tx);
 
                 this.logger.log(
-                    `📦 ${reason} | ${item.label} | delta: ${delta > 0 ? '+' : ''}${delta} | stock now: ${newStock}`,
+                    `📦 ${reason} | ${item.name} | delta: ${delta > 0 ? '+' : ''}${delta} | stock now: ${newStock}`,
                 );
             }
         };
@@ -122,12 +108,10 @@ export class InventoryStoreService {
         cementUsed: number,
         loggedBy?: string,
     ): Promise<void> {
-        const blockName = this.dimensionToItemName(dimension);
-
         await this.applyAdjustments(
             [
-                { itemName: blockName, delta: +blocksAdded },
-                { itemName: InventoryItemName.CEMENT_BAGS, delta: -cementUsed },
+                { itemName: dimension, delta: +blocksAdded },
+                { itemName: CEMENT_ITEM_NAME, delta: -cementUsed },
             ],
             TransactionReason.PRODUCTION,
             `Manufactured ${blocksAdded}x ${dimension}, used ${cementUsed} cement bags`,
@@ -139,11 +123,11 @@ export class InventoryStoreService {
      * Record a cement purchase: adds bags and logs an expense row.
      */
     async syncCementPurchase(amount: number, loggedBy?: string): Promise<void> {
-        const item = await this.findItemByName(InventoryItemName.CEMENT_BAGS);
+        const item = await this.findItemByName(CEMENT_ITEM_NAME);
         const unitPrice = Number(item.unitPrice);
 
         await this.applyAdjustments(
-            [{ itemName: InventoryItemName.CEMENT_BAGS, delta: +amount }],
+            [{ itemName: CEMENT_ITEM_NAME, delta: +amount }],
             TransactionReason.PURCHASE,
             `Restock — ${amount} bags @ ₹${unitPrice} each`,
             loggedBy,
@@ -168,7 +152,7 @@ export class InventoryStoreService {
         manager?: EntityManager,
     ): Promise<void> {
         const adjustments = items.map(({ dimension, quantity }) => ({
-            itemName: this.dimensionToItemName(dimension),
+            itemName: dimension,
             delta: -quantity,
         }));
 
@@ -177,7 +161,7 @@ export class InventoryStoreService {
 
     // ─── Read methods ─────────────────────────────────────────────────────────
 
-    async getItem(name: InventoryItemName): Promise<InventoryItem> {
+    async getItem(name: string): Promise<InventoryItem> {
         return this.findItemByName(name);
     }
 
@@ -191,7 +175,6 @@ export class InventoryStoreService {
 
         const item = this.itemRepo.create({
             name,
-            label: name,
             unit: unit ?? null,
             unitPrice: price ?? 0,
             stock: 0,

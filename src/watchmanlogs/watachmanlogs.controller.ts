@@ -2,7 +2,6 @@ import { Controller, Get, Post, Body, Patch, Param, ParseIntPipe } from '@nestjs
 import { WatchmanLogsService } from './watchmanlogs.service';
 import type { CreateWatchmanLogDto, UpdateCustomerDto } from './watchmanlogs.service';
 import { CreateCustomerDto } from './watchmanlogs.service';
-import { InventoryItemName } from '../inventory/entities/inventory_items.entity';
 
 @Controller('watchmanlogs')
 export class WatchmanLogsController {

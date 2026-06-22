@@ -4,7 +4,7 @@ import { DataSource } from 'typeorm';
 import { Bill, PaymentStatus } from './entities/bill.entity';
 import { BillItem } from './entities/bill-item.entity';
 import { CustomerPriceList } from '../watchmanlogs/entities/customer_pricelist.entity';
-import { InventoryItem, InventoryItemName } from '../inventory/entities/inventory_items.entity';
+import { InventoryItem } from '../inventory/entities/inventory_items.entity';
 import { Customer } from '../watchmanlogs/entities/customer.entity';
 import { CreateBillDto } from './entities/create-bill.dto';
 
@@ -20,20 +20,6 @@ export class BillsService {
     @InjectDataSource() private readonly dataSource: DataSource,
   ) { }
 
-  private toInventoryItemName(raw: string): InventoryItemName {
-    const normalized = raw
-      .trim()
-      .toUpperCase()
-      .replace(/\s+/g, '_')
-      .replace(/[^A-Z0-9_]/g, '');
-
-    if (Object.values(InventoryItemName).includes(normalized as InventoryItemName)) {
-      return normalized as InventoryItemName;
-    }
-
-    throw new Error(`Cannot map "${raw}" to a valid InventoryItemName enum value`);
-  }
-
   async createBill(dto: CreateBillDto): Promise<Bill | null> {
     return this.dataSource.transaction(async manager => {
       const { customer_id, bill_date, items, billing_address, billing_city, billing_state, billing_pincode } = dto;
@@ -46,7 +32,7 @@ export class BillsService {
         where: { customer: { id: customer_id } },
       });
 
-      const priceMap = new Map<InventoryItemName, CustomerPriceList>();
+      const priceMap = new Map<string, CustomerPriceList>();
       for (const entry of existingPrices) {
         priceMap.set(entry.itemName, entry);
       }
@@ -55,8 +41,7 @@ export class BillsService {
       const billItems: Partial<BillItem>[] = [];
 
       for (const item of items) {
-        const itemName = this.toInventoryItemName(item.name)
-        const existingEntry = priceMap.get(itemName)
+        const existingEntry = priceMap.get(item.name)
         let resolvedPrice: number;
 
         if (item.unit_sp !== undefined) {

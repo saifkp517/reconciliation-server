@@ -1,7 +1,6 @@
 import { Injectable, Logger } from '@nestjs/common';
 import { AddBlockStockDto } from './dto/inventory.dto';
 import { InventoryStoreService } from './inventory_store.service';
-import {type InventoryItemName } from './entities/inventory_items.entity';
 import { EntityManager } from 'typeorm';
 
 
@@ -13,7 +12,7 @@ export class InventoryService {
 
   // ─── READ ─────────────────────────────────────────────────────────────────
 
-  async getStock(name: InventoryItemName) {
+  async getStock(name: string) {
     return this.store.getItem(name);
   }
 

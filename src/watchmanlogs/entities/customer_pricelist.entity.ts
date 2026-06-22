@@ -9,7 +9,6 @@ import {
   Unique,
 } from 'typeorm';
 import { Customer } from './customer.entity';
-import { InventoryItemName } from '../../inventory/entities/inventory_items.entity';
 
 @Entity('customer_price_list')
 @Unique(['customer', 'itemName']) // one price per item per customer
@@ -24,8 +23,8 @@ export class CustomerPriceList {
   @JoinColumn({ name: 'customer_id' })
   customer!: Customer;
 
-  @Column({ type: 'enum', enum: InventoryItemName })
-  itemName!: InventoryItemName;
+  @Column({ type: 'varchar', length: 100 })
+  itemName!: string;
 
   @Column({ type: 'decimal', precision: 10, scale: 2 })
   price!: number;

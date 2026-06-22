@@ -10,11 +10,10 @@ import {
   Min,
   ValidateNested,
 } from 'class-validator';
-import { type InventoryItemName } from '../../inventory/entities/inventory_items.entity';
-
 export class CreateBillItemDto {
+  @IsString()
   @IsNotEmpty()
-  name!: InventoryItemName;
+  name!: string;
 
   @IsString()
   @IsOptional()

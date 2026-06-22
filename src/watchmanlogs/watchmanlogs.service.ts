@@ -15,16 +15,16 @@ import { Truck } from '../trucks/entities/truck.entity';
 import { InventoryService } from '../inventory/inventory.service';
 import { TrucksService } from '../trucks/trucks.service';
 import { CustomerPriceList } from './entities/customer_pricelist.entity';
-import { InventoryItemName } from '../inventory/entities/inventory_items.entity';
-import { DIMENSION_TO_ITEM_NAME } from '../inventory/inventory_store.service';
+import { InventoryItem } from '../inventory/entities/inventory_items.entity';
 import { Type } from 'class-transformer';
-import { IsEnum, IsNotEmpty, IsNumber, IsString, IsOptional, Min, ValidateNested, ArrayNotEmpty, IsArray } from 'class-validator';
+import { IsNotEmpty, IsNumber, IsString, IsOptional, Min, ValidateNested, ArrayNotEmpty, IsArray } from 'class-validator';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
 export class CreatePriceListDto {
-  @IsEnum(InventoryItemName)
-  itemName!: InventoryItemName;
+  @IsString()
+  @IsNotEmpty()
+  itemName!: string;
 
   @IsNumber()
   @Min(0)
@@ -128,16 +128,8 @@ export class UpdateCustomerDto {
   name?: string;
   phone?: string;
   address?: string;
-  prices?: Partial<Record<InventoryItemName, number>>;
+  prices?: Record<string, number>;
 }
-
-// ─── Item catalog (was fetched from Zoho, now lives here) ─────────────────────
-
-const ITEM_CATALOG: Record<string, { rate: number; purchase_rate: number; name: string }> = {
-  'BLOCK 4 inches': { rate: 29, purchase_rate: 20, name: 'BLOCK 4 inches' },
-  'BLOCK 6 inches': { rate: 36, purchase_rate: 26, name: 'BLOCK 6 inches' },
-  'BLOCK 8 inches': { rate: 44, purchase_rate: 32, name: 'BLOCK 8 inches' },
-};
 
 // ─── Service ──────────────────────────────────────────────────────────────────
 
@@ -159,14 +151,8 @@ export class WatchmanLogsService {
 
   // ─── Catalog ────────────────────────────────────────────────────────────
 
-  getItems(): { rate: number; purchase_rate: number; name: string }[] {
-    return Object.values(ITEM_CATALOG);
-  }
-
-  private getItemByDimension(dimension: string) {
-    const item = ITEM_CATALOG[dimension];
-    if (!item) throw new BadRequestException(`Unknown block dimension: ${dimension}`);
-    return item;
+  async getItems(): Promise<InventoryItem[]> {
+    return this.inventoryService.getAllStock();
   }
 
   // ─── Customers ───────────────────────────────────────────────────────────
@@ -182,20 +168,12 @@ export class WatchmanLogsService {
     // upsert each price if provided
     if (prices) {
       await Promise.all(
-        Object.entries(prices).map(([itemName, price]) => {
-          const mappedItemName = DIMENSION_TO_ITEM_NAME[itemName];
-
-          if (!mappedItemName) {
-            throw new BadRequestException(
-              `Invalid item name: "${itemName}". Allowed values: ${Object.keys(DIMENSION_TO_ITEM_NAME).join(', ')}`,
-            );
-          }
-
-          return this.priceListRepo.upsert(
-            { customer: { id }, itemName: mappedItemName, price },
+        Object.entries(prices).map(([itemName, price]) =>
+          this.priceListRepo.upsert(
+            { customer: { id }, itemName, price },
             ['customer', 'itemName'],
-          );
-        }),
+          ),
+        ),
       );
     }
     // return fresh record with updated price list
@@ -280,43 +258,35 @@ export class WatchmanLogsService {
         manager.create(Watchman_Logs, { customer_id: dto.customer_id, sale_date }),
       );
 
-      const normalizeItemName = (name: string) =>
-        name.toUpperCase().replace(/\s+/g, '_');
+      // ── Fetch inventory items + customer prices in parallel ─────────────
+      const dimensionNames = [...new Set(dto.items.map(i => i.dimension))];
+      const [inventoryItems, customerPrices] = await Promise.all([
+        manager.find(InventoryItem, { where: dimensionNames.map(name => ({ name })) }),
+        manager.find(CustomerPriceList, { where: { customer: { id: dto.customer_id } } }),
+      ]);
 
-      // ── Customer price list (fetch once, key by itemName) ───────────────
-      const customerPriceMap = new Map<string, number>();
-      if (dto.customer_id) {
-        const customerPrices = await manager.find(CustomerPriceList, {
-          where: { customer: { id: dto.customer_id } },
-        });
-        console.log({ customer_id: dto.customer_id, customerPrices });
-        for (const cp of customerPrices) {
-          customerPriceMap.set(normalizeItemName(cp.itemName), Number(cp.price));
-        }
-      }
+      const inventoryMap = new Map(inventoryItems.map(i => [i.name, i]));
+      const customerPriceMap = new Map(customerPrices.map(cp => [cp.itemName, Number(cp.price)]));
 
       // ── Sale items ──────────────────────────────────────────────────────
       const savedItems = await manager.save(
         Watchman_Log_Item,
         dto.items.map(item => {
-          const catalog = this.getItemByDimension(item.dimension);
-          console.log({
-            catalogName: catalog.name,
-            normalized: normalizeItemName(catalog.name),
-            mapKeys: [...customerPriceMap.keys()],
-          });
+          const inventoryItem = inventoryMap.get(item.dimension);
+          if (!inventoryItem) throw new BadRequestException(`Unknown item: ${item.dimension}`);
 
-          const unit_sp = customerPriceMap.get(normalizeItemName(catalog.name)) ?? catalog.rate;
+          const unit_cp = Number(inventoryItem.unitPrice);
+          const unit_sp = customerPriceMap.get(item.dimension) ?? unit_cp;
 
           return manager.create(Watchman_Log_Item, {
             watchman_log_id: savedSale.id,
             dimension: item.dimension,
             quantity: item.quantity,
-            name: catalog.name,
+            name: inventoryItem.name,
             unit_sp,
-            unit_cp: catalog.purchase_rate,
+            unit_cp,
             line_sp: unit_sp * item.quantity,
-            line_cp: catalog.purchase_rate * item.quantity,
+            line_cp: unit_cp * item.quantity,
           });
         }),
       );
