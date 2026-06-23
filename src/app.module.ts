@@ -18,6 +18,7 @@ import { AuthModule } from './auth/auth.module';
 import { BillsModule } from './bills/bills.module';
 import { Bill } from './bills/entities/bill.entity';
 import { BillItem } from './bills/entities/bill-item.entity'
+import { InvoiceSequence } from './bills/entities/invoice-sequence.entity'
 import { Truck } from './trucks/entities/truck.entity';
 import { InventoryTransaction } from './inventory/entities/inventory_transactions.entity';
 import { CustomerPriceList } from './watchmanlogs/entities/customer_pricelist.entity';
@@ -33,7 +34,7 @@ import { User } from './auth/user.entity';
         type: 'postgres',
         url: configService.get<string>('SUPABASE_DB_URL'),
         ssl: { rejectUnauthorized: false },
-        entities: [ Watchman_Logs, Watchman_Log_Item, WatchmanLogTruck, WatchmanLogTruckItem, Customer, Truck, Expense, InventoryItem, InventoryTransaction, CustomerPriceList, User, Bill, BillItem],
+        entities: [ Watchman_Logs, Watchman_Log_Item, WatchmanLogTruck, WatchmanLogTruckItem, Customer, Truck, Expense, InventoryItem, InventoryTransaction, CustomerPriceList, User, Bill, BillItem, InvoiceSequence],
         synchronize: true, // fine for dev, turn off in production
         logging: false,
       }),

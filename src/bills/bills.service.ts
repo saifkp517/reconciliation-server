@@ -7,12 +7,21 @@ import { CustomerPriceList } from '../watchmanlogs/entities/customer_pricelist.e
 import { InventoryItem } from '../inventory/entities/inventory_items.entity';
 import { Customer } from '../watchmanlogs/entities/customer.entity';
 import { CreateBillDto } from './entities/create-bill.dto';
+import { COMPANY_PREFIX, getFiscalYear, nextInvoiceSeq } from './invoice.util';
 
 export class RecordPaymentDto {
   paid_amount!: number;
   payment_status!: PaymentStatus;
   payment_date!: string;
 }
+
+export class BulkUpdateBillDto {
+  id!: number;
+  paid_amount?: number;
+  payment_status?: PaymentStatus;
+  payment_date?: string;
+}
+
 
 @Injectable()
 export class BillsService {
@@ -24,7 +33,6 @@ export class BillsService {
     return this.dataSource.transaction(async manager => {
       const { customer_id, bill_date, items, billing_address, billing_city, billing_state, billing_pincode } = dto;
 
-      // ── Fetch customer (for address fallback) + price list ───────────────
       const customer = await manager.findOne(Customer, { where: { id: customer_id } });
       if (!customer) throw new NotFoundException(`Customer #${customer_id} not found`);
 
@@ -37,7 +45,6 @@ export class BillsService {
         priceMap.set(entry.itemName, entry);
       }
 
-      // ── Resolve prices + build bill items ────────────────────────────────
       const billItems: Partial<BillItem>[] = [];
 
       for (const item of items) {
@@ -45,11 +52,9 @@ export class BillsService {
         let resolvedPrice: number;
 
         if (item.unit_sp !== undefined) {
-          // Salesman entered a price — this is the source of truth
           resolvedPrice = item.unit_sp;
 
           if (!existingEntry) {
-            // No price list entry yet — insert one
             await manager.save(
               CustomerPriceList,
               manager.create(CustomerPriceList, {
@@ -59,17 +64,13 @@ export class BillsService {
               }),
             );
           } else if (Number(existingEntry.price) !== resolvedPrice) {
-            // Entry exists but price changed — update it
             existingEntry.price = resolvedPrice;
             await manager.save(CustomerPriceList, existingEntry);
           }
-          // If price matches exactly — no write needed
         } else {
-          // Salesman didn't enter a price — resolve from price list or inventory
           if (existingEntry) {
             resolvedPrice = Number(existingEntry.price);
           } else {
-            // Fall back to inventory unit_price
             const inventoryItem = await manager.findOne(InventoryItem, {
               where: { name: item.name },
             });
@@ -82,7 +83,6 @@ export class BillsService {
 
             resolvedPrice = Number(inventoryItem.unitPrice);
 
-            // Insert into price list so future bills autopopulate
             await manager.save(
               CustomerPriceList,
               manager.create(CustomerPriceList, {
@@ -103,18 +103,23 @@ export class BillsService {
         });
       }
 
-      // ── Compute due date (7 days from bill_date) ─────────────────────────
       const due = new Date(bill_date);
       due.setDate(due.getDate() + 7);
       const due_date = due.toISOString().slice(0, 10);
 
-      // ── Save bill header ─────────────────────────────────────────────────
+      // ── Assign fiscal invoice number ─────────────────────────────────────
+      const fiscalYear = getFiscalYear(bill_date);
+      const fiscal_seq = await nextInvoiceSeq(manager, 'SL', fiscalYear);
+      const invoice_no = `${COMPANY_PREFIX}/SL/${fiscalYear}/${fiscal_seq}`;
+
       const savedBill = await manager.save(
         Bill,
         manager.create(Bill, {
           customer_id,
           bill_date,
           due_date,
+          fiscal_seq,
+          invoice_no,
           billing_address: billing_address ?? customer.address ?? null,
           billing_city: billing_city ?? null,
           billing_state: billing_state ?? null,
@@ -122,7 +127,6 @@ export class BillsService {
         }),
       );
 
-      // ── Save bill items ──────────────────────────────────────────────────
       await manager.save(
         BillItem,
         billItems.map(item =>
@@ -130,7 +134,6 @@ export class BillsService {
         ),
       );
 
-      // ── Return full bill with relations ──────────────────────────────────
       return manager.findOne(Bill, {
         where: { id: savedBill.id },
         relations: ['items', 'customer'],
@@ -167,6 +170,21 @@ export class BillsService {
     bill.payment_date = dto.payment_date;
 
     return repo.save(bill);
+  }
+
+  async bulkUpdate(updates: BulkUpdateBillDto[]): Promise<Bill[]> {
+    const repo = this.dataSource.getRepository(Bill);
+
+    const bills = await Promise.all(
+      updates.map(async ({ id, ...fields }) => {
+        const bill = await repo.findOne({ where: { id }, relations: ['items', 'customer'] });
+        if (!bill) throw new NotFoundException(`Bill #${id} not found`);
+        Object.assign(bill, fields);
+        return repo.save(bill);
+      }),
+    );
+
+    return bills;
   }
 
   async getPriceListByCustomer(customerId: number): Promise<CustomerPriceList[]> {

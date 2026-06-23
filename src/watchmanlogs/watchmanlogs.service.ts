@@ -18,6 +18,7 @@ import { CustomerPriceList } from './entities/customer_pricelist.entity';
 import { InventoryItem } from '../inventory/entities/inventory_items.entity';
 import { Type } from 'class-transformer';
 import { IsNotEmpty, IsNumber, IsString, IsOptional, Min, ValidateNested, ArrayNotEmpty, IsArray } from 'class-validator';
+import { COMPANY_PREFIX, getFiscalYear, nextInvoiceSeq } from '../bills/invoice.util';
 
 // ─── DTOs ─────────────────────────────────────────────────────────────────────
 
@@ -129,6 +130,12 @@ export class UpdateCustomerDto {
   phone?: string;
   address?: string;
   prices?: Record<string, number>;
+}
+
+export class BulkUpdateWatchmanLogDto {
+  id!: number;
+  sale_date?: string;
+  customer_id?: number;
 }
 
 // ─── Service ──────────────────────────────────────────────────────────────────
@@ -252,10 +259,15 @@ export class WatchmanLogsService {
     return this.dataSource.transaction(async manager => {
       const { sale_date } = dto;
 
+      // ── Assign fiscal invoice number ────────────────────────────────────
+      const fiscalYear = getFiscalYear(sale_date);
+      const fiscal_seq = await nextInvoiceSeq(manager, 'WL', fiscalYear);
+      const invoice_no = `${COMPANY_PREFIX}/WL/${fiscalYear}/${fiscal_seq}`;
+
       // ── Watchman Log header ─────────────────────────────────────────────
       const savedSale = await manager.save(
         Watchman_Logs,
-        manager.create(Watchman_Logs, { customer_id: dto.customer_id, sale_date }),
+        manager.create(Watchman_Logs, { customer_id: dto.customer_id, sale_date, fiscal_seq, invoice_no }),
       );
 
       // ── Fetch inventory items + customer prices in parallel ─────────────
@@ -309,6 +321,22 @@ export class WatchmanLogsService {
         relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
       });
     });
+  }
+
+  async bulkUpdate(updates: BulkUpdateWatchmanLogDto[]): Promise<Watchman_Logs[]> {
+    const repo = this.watchmanLogRepo;
+
+    return Promise.all(
+      updates.map(async ({ id, ...fields }) => {
+        const log = await repo.findOne({
+          where: { id },
+          relations: ['items', 'customer', 'trucks', 'trucks.truck', 'trucks.items'],
+        });
+        if (!log) throw new NotFoundException(`Watchman Log #${id} not found`);
+        Object.assign(log, fields);
+        return repo.save(log);
+      }),
+    );
   }
 
 }

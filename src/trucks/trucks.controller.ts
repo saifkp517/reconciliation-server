@@ -25,6 +25,21 @@ export class TrucksController {
     return this.trucksService.getTrucksBySale(Number(saleId));
   }
 
+  @Patch('logs/bulk')
+  bulkUpdateLogs(
+    @Body() updates: { id: number; status?: string; departed_at?: string; arrived_at?: string; notes?: string }[],
+  ) {
+    return this.trucksService.bulkUpdateTruckLogs(updates);
+  }
+
+  @Patch('logs/:id')
+  updateLog(
+    @Param('id') id: number,
+    @Body() body: { status?: string; departed_at?: string; arrived_at?: string; notes?: string },
+  ) {
+    return this.trucksService.bulkUpdateTruckLogs([{ id: Number(id), ...body }]).then(r => r[0]);
+  }
+
   @Patch('return/:saleTruckId')
   markReturned(
     @Param('saleTruckId') saleTruckId: number,

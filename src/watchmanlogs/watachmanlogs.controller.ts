@@ -1,7 +1,7 @@
 import { Controller, Get, Post, Body, Patch, Param, ParseIntPipe } from '@nestjs/common';
 import { WatchmanLogsService } from './watchmanlogs.service';
 import type { CreateWatchmanLogDto, UpdateCustomerDto } from './watchmanlogs.service';
-import { CreateCustomerDto } from './watchmanlogs.service';
+import { BulkUpdateWatchmanLogDto, CreateCustomerDto } from './watchmanlogs.service';
 
 @Controller('watchmanlogs')
 export class WatchmanLogsController {
@@ -37,6 +37,19 @@ export class WatchmanLogsController {
     return this.watchmanLogsService.updateCustomer(customerId, body);
   }
 
+
+  @Patch('bulk')
+  bulkUpdate(@Body() updates: BulkUpdateWatchmanLogDto[]) {
+    return this.watchmanLogsService.bulkUpdate(updates);
+  }
+
+  @Patch(':id')
+  updateOne(
+    @Param('id', ParseIntPipe) id: number,
+    @Body() body: Omit<BulkUpdateWatchmanLogDto, 'id'>,
+  ) {
+    return this.watchmanLogsService.bulkUpdate([{ id, ...body }]).then(r => r[0]);
+  }
 
   @Get()
   getAllWatchmanLogs() {

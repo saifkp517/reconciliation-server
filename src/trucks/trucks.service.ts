@@ -54,12 +54,29 @@ export class TrucksService {
     });
   }
 
+  async bulkUpdateTruckLogs(
+    updates: { id: number; status?: string; departed_at?: string; arrived_at?: string; notes?: string }[],
+  ): Promise<WatchmanLogTruck[]> {
+    return Promise.all(
+      updates.map(async ({ id, departed_at, arrived_at, ...rest }) => {
+        const log = await this.saleTruckRepo.findOne({ where: { id }, relations: ['truck', 'items'] });
+        if (!log) throw new BadRequestException(`Truck log #${id} not found`);
+        Object.assign(log, {
+          ...rest,
+          ...(departed_at !== undefined && { departed_at: new Date(departed_at) }),
+          ...(arrived_at !== undefined && { arrived_at: new Date(arrived_at) }),
+        });
+        return this.saleTruckRepo.save(log);
+      }),
+    );
+  }
+
   async markTruckReturned(
-    truckId: number,
+    saleTruckId: number,
     returnedAt: Date,
   ): Promise<WatchmanLogTruck> {
     const saleTruck = await this.saleTruckRepo.findOne({
-      where: { truck_id: truckId, status: 'pending' }, // or 
+      where: { id: saleTruckId },
       relations: ['truck'],
     });
 
@@ -72,7 +89,7 @@ export class TrucksService {
 
     await this.saleTruckRepo.save(saleTruck);
 
-    await this.truckRepo.update(truckId, { is_available: true });
+    await this.truckRepo.update(saleTruck.truck_id, { is_available: true });
 
     return saleTruck;
   }

@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Param, ParseIntPipe, Patch, Post } from '@nestjs/common';
-import { BillsService, RecordPaymentDto } from './bills.service';
+import { BillsService, BulkUpdateBillDto, RecordPaymentDto } from './bills.service';
 import { CreateBillDto } from './entities/create-bill.dto';
 
 @Controller('bills')
@@ -30,6 +30,11 @@ export class BillsController {
   @Get(':id')
   findOne(@Param('id', ParseIntPipe) id: number) {
     return this.billsService.findOne(id);
+  }
+
+  @Patch('bulk')
+  bulkUpdate(@Body() updates: BulkUpdateBillDto[]) {
+    return this.billsService.bulkUpdate(updates);
   }
 
   @Patch(':id')

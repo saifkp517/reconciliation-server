@@ -23,8 +23,11 @@ export class Bill {
   @PrimaryGeneratedColumn()
   id!: number;
 
-  // Virtual field — never stored, computed on load
+  @Column({ nullable: true })
   invoice_no!: string;
+
+  @Column({ nullable: true })
+  fiscal_seq!: number;
 
   @Column({ nullable: false })
   customer_id!: number;
@@ -73,12 +76,10 @@ export class Bill {
   @OneToMany(() => BillItem, item => item.bill, { cascade: true })
   items!: BillItem[];
 
-  // Virtual field — computed on load from items
   totalAmount!: number;
 
   @AfterLoad()
   compute() {
-    this.invoice_no = `BILL-${this.bill_date?.replace(/-/g, '')}-${String(this.id).padStart(3, '0')}`;
     this.totalAmount = (this.items ?? []).reduce(
       (sum, item) => sum + Number(item.line_sp),
       0,

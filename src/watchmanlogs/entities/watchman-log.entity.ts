@@ -12,6 +12,9 @@ export class Watchman_Logs {
   invoice_no!: string;
 
   @Column({ nullable: true })
+  fiscal_seq!: number;
+
+  @Column({ nullable: true })
   customer_id!: number;
 
   @Column({ type: 'date' })
@@ -36,7 +39,7 @@ export class Watchman_Logs {
   @OneToMany(() => Watchman_Log_Item, item => item.watchman_log, { cascade: true })
   items!: Watchman_Log_Item[];
 
-  totalAmount!: number; // virtual field, no @Column
+  totalAmount!: number;
 
   @AfterLoad()
   compute() {
@@ -44,6 +47,5 @@ export class Watchman_Logs {
       (sum, item) => sum + Number(item.line_sp),
       0
     );
-    this.invoice_no = `INV-${this.sale_date.replace(/-/g, '')}-${String(this.id).padStart(3, '0')}`;
   }
 }
