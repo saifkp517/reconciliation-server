@@ -3,6 +3,7 @@ import { InjectDataSource } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
 import { Bill, PaymentStatus } from './entities/bill.entity';
 import { BillItem } from './entities/bill-item.entity';
+import { BillPayment } from './entities/bill-payment.entity';
 import { CustomerPriceList } from '../watchmanlogs/entities/customer_pricelist.entity';
 import { InventoryItem } from '../inventory/entities/inventory_items.entity';
 import { Customer } from '../watchmanlogs/entities/customer.entity';
@@ -10,9 +11,13 @@ import { CreateBillDto } from './entities/create-bill.dto';
 import { COMPANY_PREFIX, getFiscalYear, nextInvoiceSeq } from './invoice.util';
 
 export class RecordPaymentDto {
-  paid_amount!: number;
-  payment_status!: PaymentStatus;
+  amount!: number;
   payment_date!: string;
+  notes?: string;
+}
+
+export class ApplyDiscountDto {
+  discount_amount!: number;
 }
 
 export class BulkUpdateBillDto {
@@ -151,7 +156,7 @@ export class BillsService {
   async findOne(id: number): Promise<Bill> {
     const bill = await this.dataSource.getRepository(Bill).findOne({
       where: { id },
-      relations: ['items', 'customer'],
+      relations: ['items', 'customer', 'payments'],
     });
 
     if (!bill) throw new NotFoundException(`Bill #${id} not found`);
@@ -160,16 +165,50 @@ export class BillsService {
   }
 
   async recordPayment(id: number, dto: RecordPaymentDto): Promise<Bill> {
-    const repo = this.dataSource.getRepository(Bill);
-    const bill = await repo.findOne({ where: { id }, relations: ['items', 'customer'] });
+    return this.dataSource.transaction(async manager => {
+      const bill = await manager.findOne(Bill, {
+        where: { id },
+        relations: ['items', 'customer'],
+      });
 
+      if (!bill) throw new NotFoundException(`Bill #${id} not found`);
+
+      await manager.query(
+        `INSERT INTO bill_payments (bill_id, amount, payment_date, notes) VALUES ($1, $2, $3, $4)`,
+        [id, dto.amount, dto.payment_date, dto.notes ?? null],
+      );
+
+      const allPayments = await manager.find(BillPayment, { where: { bill: { id } } });
+      const totalPaid = allPayments.reduce((sum, p) => sum + Number(p.amount), 0);
+      const totalAmount = (bill.items ?? []).reduce((sum, item) => sum + Number(item.line_sp), 0);
+
+      bill.paid_amount = totalPaid;
+      bill.payment_date = dto.payment_date;
+
+      if (totalPaid >= totalAmount) {
+        bill.payment_status = PaymentStatus.PAID;
+        bill.due_date = null;
+      } else if (totalPaid > 0) {
+        bill.payment_status = PaymentStatus.PARTIAL;
+      }
+
+      await manager.save(Bill, bill);
+
+      return manager.findOne(Bill, {
+        where: { id },
+        relations: ['items', 'customer', 'payments'],
+      }) as Promise<Bill>;
+    });
+  }
+
+  async getPayments(id: number): Promise<BillPayment[]> {
+    const bill = await this.dataSource.getRepository(Bill).findOne({ where: { id } });
     if (!bill) throw new NotFoundException(`Bill #${id} not found`);
 
-    bill.paid_amount = dto.paid_amount;
-    bill.payment_status = dto.payment_status;
-    bill.payment_date = dto.payment_date;
-
-    return repo.save(bill);
+    return this.dataSource.getRepository(BillPayment).find({
+      where: { bill: { id } },
+      order: { payment_date: 'ASC', created_at: 'ASC' },
+    });
   }
 
   async bulkUpdate(updates: BulkUpdateBillDto[]): Promise<Bill[]> {
@@ -185,6 +224,38 @@ export class BillsService {
     );
 
     return bills;
+  }
+
+  async applyDiscount(id: number, dto: ApplyDiscountDto): Promise<Bill> {
+    return this.dataSource.transaction(async manager => {
+      const bill = await manager.findOne(Bill, {
+        where: { id },
+        relations: ['items', 'customer', 'payments'],
+      });
+
+      if (!bill) throw new NotFoundException(`Bill #${id} not found`);
+
+      bill.discount_amount = dto.discount_amount;
+
+      const subtotal = (bill.items ?? []).reduce((sum, item) => sum + Number(item.line_sp), 0);
+      const netTotal = subtotal - dto.discount_amount;
+
+      if (bill.paid_amount >= netTotal) {
+        bill.payment_status = PaymentStatus.PAID;
+        bill.due_date = null;
+      } else if (Number(bill.paid_amount) > 0) {
+        bill.payment_status = PaymentStatus.PARTIAL;
+      } else {
+        bill.payment_status = PaymentStatus.OUTSTANDING;
+      }
+
+      await manager.save(Bill, bill);
+
+      return manager.findOne(Bill, {
+        where: { id },
+        relations: ['items', 'customer', 'payments'],
+      }) as Promise<Bill>;
+    });
   }
 
   async getPriceListByCustomer(customerId: number): Promise<CustomerPriceList[]> {

@@ -11,6 +11,7 @@ import {
 } from 'typeorm';
 import { Customer } from '../../watchmanlogs/entities/customer.entity';
 import { BillItem } from './bill-item.entity';
+import { BillPayment } from './bill-payment.entity';
 
 export enum PaymentStatus {
   OUTSTANDING = 'OUTSTANDING',
@@ -48,6 +49,9 @@ export class Bill {
   @Column({ type: 'numeric', default: 0 })
   paid_amount!: number;
 
+  @Column({ type: 'numeric', default: 0 })
+  discount_amount!: number;
+
   @Column({ type: 'date', nullable: true })
   payment_date!: string | null;
 
@@ -76,13 +80,17 @@ export class Bill {
   @OneToMany(() => BillItem, item => item.bill, { cascade: true })
   items!: BillItem[];
 
+  @OneToMany(() => BillPayment, payment => payment.bill)
+  payments!: BillPayment[];
+
   totalAmount!: number;
 
   @AfterLoad()
   compute() {
-    this.totalAmount = (this.items ?? []).reduce(
+    const subtotal = (this.items ?? []).reduce(
       (sum, item) => sum + Number(item.line_sp),
       0,
     );
+    this.totalAmount = subtotal - Number(this.discount_amount ?? 0);
   }
 }

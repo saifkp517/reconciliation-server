@@ -9,7 +9,7 @@ import { Truck } from '../trucks/entities/truck.entity';
 import { InventoryModule } from '../inventory/inventory.module';
 import { WatchmanLogsService } from './watchmanlogs.service';
 import { TrucksModule } from '../trucks/trucks.module';
-import { WatchmanLogsController } from './watachmanlogs.controller';
+import { WatchmanLogsController } from './watchmanlogs.controller';
 import { CustomerPriceList } from './entities/customer_pricelist.entity';
 
 @Module({
