@@ -23,9 +23,10 @@ export class TrucksService {
     return this.truckRepo.find();
   }
 
-  async getActiveTrucks(): Promise<Truck[]> {
-    return this.truckRepo.find({
-      where: { is_available: false },
+  async getActiveTrucks(): Promise<WatchmanLogTruck[]> {
+    return this.saleTruckRepo.find({
+      where: { status: 'pending' },
+      relations: ['truck'],
       order: { id: 'ASC' },
     });
   }
