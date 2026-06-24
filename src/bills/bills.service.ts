@@ -27,6 +27,25 @@ export class BulkUpdateBillDto {
   payment_date?: string;
 }
 
+export class UpdateBillItemDto {
+  name?: string;
+  dimension?: string;
+  quantity!: number;
+  unit_sp!: number;
+  line_sp?: number;
+}
+
+export class UpdateBillDto {
+  customer_id?: number;
+  bill_date?: string;
+  due_date?: string | null;
+  billing_address?: string | null;
+  billing_city?: string | null;
+  billing_state?: string | null;
+  billing_pincode?: string | null;
+  items?: UpdateBillItemDto[];
+}
+
 
 @Injectable()
 export class BillsService {
@@ -162,6 +181,32 @@ export class BillsService {
     if (!bill) throw new NotFoundException(`Bill #${id} not found`);
 
     return bill;
+  }
+
+  async updateBill(id: number, dto: UpdateBillDto): Promise<Bill> {
+    return this.dataSource.transaction(async manager => {
+      const bill = await manager.findOne(Bill, { where: { id } });
+      if (!bill) throw new NotFoundException(`Bill #${id} not found`);
+
+      const { items, ...headerFields } = dto;
+      if (Object.keys(headerFields).length) {
+        await manager.update(Bill, id, headerFields);
+      }
+
+      if (items !== undefined) {
+        await manager.delete(BillItem, { bill_id: id });
+        const newItems = items.map(item =>
+          manager.create(BillItem, {
+            ...item,
+            bill_id: id,
+            line_sp: item.line_sp ?? item.quantity * item.unit_sp,
+          })
+        );
+        await manager.save(BillItem, newItems);
+      }
+
+      return manager.findOne(Bill, { where: { id }, relations: ['items', 'customer', 'payments'] }) as Promise<Bill>;
+    });
   }
 
   async recordPayment(id: number, dto: RecordPaymentDto): Promise<Bill> {
