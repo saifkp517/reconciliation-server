@@ -6,15 +6,16 @@ import { Bill } from './entities/bill.entity';
 import { BillItem } from './entities/bill-item.entity';
 import { BillPayment } from './entities/bill-payment.entity';
 import { InvoiceSequence } from './entities/invoice-sequence.entity';
-import { CustomerPriceList } from '../watchmanlogs/entities/customer_pricelist.entity';
 import { InventoryItem } from '../inventory/entities/inventory_items.entity';
+import { CustomersModule } from '../customers/customers.module';
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([Bill, BillItem, BillPayment, InvoiceSequence, CustomerPriceList, InventoryItem]),
+    TypeOrmModule.forFeature([Bill, BillItem, BillPayment, InvoiceSequence, InventoryItem]),
+    CustomersModule,
   ],
   controllers: [BillsController],
   providers: [BillsService],
-  exports: [BillsService], // export if reconciliation module needs it later
+  exports: [BillsService],
 })
 export class BillsModule {}

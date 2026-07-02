@@ -1,57 +1,57 @@
-import { Injectable, Logger } from '@nestjs/common';
-import { AddBlockStockDto } from './dto/inventory.dto';
+import { Injectable } from '@nestjs/common';
 import { InventoryStoreService } from './inventory_store.service';
 import { EntityManager } from 'typeorm';
 
-
 @Injectable()
 export class InventoryService {
-  private readonly logger = new Logger(InventoryService.name);
-
   constructor(private readonly store: InventoryStoreService) {}
 
-  // ─── READ ─────────────────────────────────────────────────────────────────
-
-  async getStock(name: string) {
-    return this.store.getItem(name);
+  getAllItems(type?: 'raw_material' | 'product') {
+    return this.store.getAllItems(type);
   }
 
-  async getAllStock() {
-    return this.store.getAllItems();
+  getItem(id: number) {
+    return this.store.getItemById(id);
   }
 
-  async getProductionLogs() {
-    return this.store.getProdutionLogs();
+  createItem(name: string, type: 'raw_material' | 'product', unit?: string, price?: number) {
+    return this.store.createItem(name, type, unit, price);
   }
 
-  // ─── WRITE ────────────────────────────────────────────────────────────────
-
-  async manufactureBlocks(dto: AddBlockStockDto, loggedBy?: string): Promise<void> {
-    await this.store.syncManufacture(dto.dimension, dto.amount, dto.cementBagsUsed, loggedBy);
+  deleteItem(id: number) {
+    return this.store.deleteItem(id);
   }
 
-  async createItem(name: string, unit?: string, price?: number) {
-    return this.store.createItem(name, unit, price);
-  }
-
-  async setQuantity(id: number, quantity: number, loggedBy?: string) {
+  setQuantity(id: number, quantity: number, loggedBy?: string) {
     return this.store.setQuantityById(id, quantity, loggedBy);
   }
 
-  async setPrice(id: number, price: number) {
+  setPrice(id: number, price: number) {
     return this.store.setPriceById(id, price);
   }
 
-  async addCementStock(amount: number): Promise<void> {
-    await this.store.syncCementPurchase(amount, 'manager');
+  setName(id: number, name: string) {
+    return this.store.setNameById(id, name);
   }
 
-  async validateAndDeductStock(
-    items: { dimension: string; quantity: number }[],
+  getTransactionLogs() {
+    return this.store.getTransactionLogs();
+  }
+
+  deductStock(itemId: number, quantity: number, manager: EntityManager, notes?: string, loggedBy?: string) {
+    return this.store.deductStockById(itemId, quantity, manager, notes, loggedBy);
+  }
+
+  addStock(itemId: number, quantity: number, manager: EntityManager, notes?: string, loggedBy?: string) {
+    return this.store.restoreStockById(itemId, quantity, manager, notes, loggedBy);
+  }
+
+  validateAndDeductStock(
+    items: { itemId: number; quantity: number }[],
     notes?: string,
     loggedBy?: string,
     manager?: EntityManager,
-  ): Promise<void> {
-    await this.store.syncDispatch(items, notes, loggedBy, manager);
+  ) {
+    return this.store.syncDispatch(items, notes, loggedBy, manager);
   }
 }

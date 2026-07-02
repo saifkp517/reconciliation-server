@@ -11,13 +11,10 @@ import {
   ValidateNested,
 } from 'class-validator';
 export class CreateBillItemDto {
-  @IsString()
+  @IsInt()
   @IsNotEmpty()
-  name!: string;
-
-  @IsString()
-  @IsOptional()
-  dimension?: string;
+  @Min(1)
+  itemId!: number;
 
   @IsInt()
   @Min(1)

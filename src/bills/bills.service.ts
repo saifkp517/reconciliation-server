@@ -1,6 +1,6 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { InjectDataSource } from '@nestjs/typeorm';
-import { DataSource } from 'typeorm';
+import { DataSource, In } from 'typeorm';
 import { Bill, PaymentStatus } from './entities/bill.entity';
 import { BillItem } from './entities/bill-item.entity';
 import { BillPayment } from './entities/bill-payment.entity';
@@ -28,8 +28,7 @@ export class BulkUpdateBillDto {
 }
 
 export class UpdateBillItemDto {
-  name?: string;
-  dimension?: string;
+  itemId!: number;
   quantity!: number;
   unit_sp!: number;
   line_sp?: number;
@@ -69,10 +68,20 @@ export class BillsService {
         priceMap.set(entry.itemName, entry);
       }
 
+      // Fetch all inventory items referenced by this bill up-front
+      const itemIds = [...new Set(items.map(i => i.itemId))];
+      const inventoryItems = await manager.find(InventoryItem, {
+        where: { id: In(itemIds) },
+      });
+      const inventoryMap = new Map(inventoryItems.map(i => [i.id, i]));
+
       const billItems: Partial<BillItem>[] = [];
 
       for (const item of items) {
-        const existingEntry = priceMap.get(item.name)
+        const inventoryItem = inventoryMap.get(item.itemId);
+        if (!inventoryItem) throw new NotFoundException(`Inventory item #${item.itemId} not found`);
+
+        const existingEntry = priceMap.get(inventoryItem.name);
         let resolvedPrice: number;
 
         if (item.unit_sp !== undefined) {
@@ -83,7 +92,7 @@ export class BillsService {
               CustomerPriceList,
               manager.create(CustomerPriceList, {
                 customer: { id: customer_id },
-                itemName: item.name,
+                itemName: inventoryItem.name,
                 price: resolvedPrice,
               }),
             );
@@ -95,23 +104,13 @@ export class BillsService {
           if (existingEntry) {
             resolvedPrice = Number(existingEntry.price);
           } else {
-            const inventoryItem = await manager.findOne(InventoryItem, {
-              where: { name: item.name },
-            });
-
-            if (!inventoryItem) {
-              throw new NotFoundException(
-                `No price found for item "${item.name}" — add it to the inventory or enter a price manually.`,
-              );
-            }
-
             resolvedPrice = Number(inventoryItem.unitPrice);
 
             await manager.save(
               CustomerPriceList,
               manager.create(CustomerPriceList, {
                 customer: { id: customer_id },
-                itemName: item.name,
+                itemName: inventoryItem.name,
                 price: resolvedPrice,
               }),
             );
@@ -119,8 +118,7 @@ export class BillsService {
         }
 
         billItems.push({
-          name: item.name,
-          dimension: item.dimension,
+          itemId: item.itemId,
           quantity: item.quantity,
           unit_sp: resolvedPrice,
           line_sp: resolvedPrice * item.quantity,

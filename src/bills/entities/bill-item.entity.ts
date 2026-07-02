@@ -6,6 +6,7 @@ import {
   JoinColumn,
 } from 'typeorm';
 import { Bill } from './bill.entity';
+import { InventoryItem } from '../../inventory/entities/inventory_items.entity';
 
 @Entity('bill_items')
 export class BillItem {
@@ -15,11 +16,12 @@ export class BillItem {
   @Column()
   bill_id!: number;
 
-  @Column({ nullable: true })
-  dimension!: string;
+  @Column({ name: 'item_id', nullable: true })
+  itemId!: number | null;
 
-  @Column({ nullable: true })
-  name!: string;
+  @ManyToOne(() => InventoryItem, { eager: false, nullable: true })
+  @JoinColumn({ name: 'item_id' })
+  item!: InventoryItem;
 
   @Column()
   quantity!: number;

@@ -4,7 +4,7 @@ import { Watchman_Logs } from '../watchmanlogs/entities/watchman-log.entity';
 import { Watchman_Log_Item } from '../watchmanlogs/entities/watchman-log-items.entity';
 import { WatchmanLogTruck } from './entities/watchmanlog-truck.entity';
 import { WatchmanLogTruckItem } from './entities/watchmanlog-truck-item.entity';
-import { CreateSaleTruckDto } from '../watchmanlogs/watchmanlogs.service';
+import { CreateSaleTruckDto, UpdateSaleTruckDto } from '../watchmanlogs/watchmanlogs.service';
 import { Between, Repository } from 'typeorm';
 import { Truck } from './entities/truck.entity';
 import { Injectable, BadRequestException } from '@nestjs/common';
@@ -142,7 +142,7 @@ export class TrucksService {
     manager: EntityManager,
     saleId: number,
     savedItems: Watchman_Log_Item[],
-    dtoItems: { dimension: string; quantity: number }[],
+    dtoItems: { itemId: number; quantity: number }[],
     trucks: CreateSaleTruckDto[],
     skipActiveCheck = false,
   ): Promise<void> {
@@ -204,6 +204,108 @@ export class TrucksService {
           }),
         ),
       );
+    }
+  }
+
+  async updateTrucksForSale(
+    manager: EntityManager,
+    saleId: number,
+    trucks: UpdateSaleTruckDto[],
+  ): Promise<void> {
+    const existingTrucks = await manager.find(WatchmanLogTruck, {
+      where: { sale_id: saleId },
+      relations: ['items'],
+    });
+    const existingMap = new Map(existingTrucks.map(t => [t.id, t]));
+    const incomingIds = new Set(trucks.filter(t => t.id != null).map(t => t.id!));
+
+    // Removed trucks → drop their child items and free up the truck
+    for (const existing of existingTrucks) {
+      if (!incomingIds.has(existing.id)) {
+        await manager.delete(WatchmanLogTruckItem, { watchmanlog_truck_id: existing.id });
+        await manager.update(Truck, existing.truck_id, { is_available: true });
+        await manager.remove(WatchmanLogTruck, existing);
+      }
+    }
+
+    for (const incoming of trucks) {
+      if (incoming.id != null && existingMap.has(incoming.id)) {
+        // Update existing truck assignment
+        const existing = existingMap.get(incoming.id)!;
+
+        if (existing.truck_id !== incoming.truck_id) {
+          const newTruck = await manager.findOne(Truck, {
+            where: { id: incoming.truck_id, is_available: true },
+          });
+          if (!newTruck) {
+            throw new BadRequestException(
+              `Truck ${incoming.truck_id} does not exist or is not available`,
+            );
+          }
+          await manager.update(Truck, existing.truck_id, { is_available: true });
+          await manager.update(Truck, incoming.truck_id, { is_available: false });
+          existing.truck_id = incoming.truck_id;
+        }
+
+        if (incoming.status !== undefined) existing.status = incoming.status;
+        if (incoming.departed_at !== undefined) existing.departed_at = new Date(incoming.departed_at);
+        if (incoming.arrived_at !== undefined) {
+          existing.arrived_at = incoming.arrived_at ? new Date(incoming.arrived_at) : null;
+        }
+        await manager.save(WatchmanLogTruck, existing);
+
+        if (incoming.items !== undefined) {
+          await manager.delete(WatchmanLogTruckItem, { watchmanlog_truck_id: existing.id });
+          await manager.save(
+            WatchmanLogTruckItem,
+            incoming.items.map(ti =>
+              manager.create(WatchmanLogTruckItem, {
+                watchmanlog_truck_id: existing.id,
+                watchman_log_item_id: ti.watchman_log_item_id,
+                quantity: ti.quantity,
+                notes: ti.notes,
+              }),
+            ),
+          );
+        }
+      } else {
+        // New truck assignment
+        const truck = await manager.findOne(Truck, {
+          where: { id: incoming.truck_id, is_available: true },
+        });
+        if (!truck) {
+          throw new BadRequestException(
+            `Truck ${incoming.truck_id} does not exist or is not available`,
+          );
+        }
+        await manager.update(Truck, incoming.truck_id, { is_available: false });
+
+        const saleTruck = await manager.save(
+          WatchmanLogTruck,
+          manager.create(WatchmanLogTruck, {
+            sale_id: saleId,
+            truck_id: incoming.truck_id,
+            notes: incoming.notes,
+            status: incoming.status ?? 'pending',
+            departed_at: incoming.departed_at ? new Date(incoming.departed_at) : new Date(),
+            arrived_at: incoming.arrived_at ? new Date(incoming.arrived_at) : null,
+          }),
+        );
+
+        if (incoming.items?.length) {
+          await manager.save(
+            WatchmanLogTruckItem,
+            incoming.items.map(ti =>
+              manager.create(WatchmanLogTruckItem, {
+                watchmanlog_truck_id: saleTruck.id,
+                watchman_log_item_id: ti.watchman_log_item_id,
+                quantity: ti.quantity,
+                notes: ti.notes,
+              }),
+            ),
+          );
+        }
+      }
     }
   }
 }

@@ -13,6 +13,7 @@ export enum TransactionReason {
   PRODUCTION = 'PRODUCTION',  // blocks manufactured (cement -, blocks +)
   DISPATCH   = 'DISPATCH',    // blocks sent out on trucks
   ADJUSTMENT = 'ADJUSTMENT',  // manual correction
+  SALE       = 'SALE',        // sold via watchman log
 }
 
 @Entity('inventory_transactions')

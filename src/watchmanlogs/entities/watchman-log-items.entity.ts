@@ -3,6 +3,7 @@ import {
   ManyToOne, JoinColumn,
 } from 'typeorm';
 import { Watchman_Logs } from './watchman-log.entity';
+import { InventoryItem } from '../../inventory/entities/inventory_items.entity';
 
 @Entity('watchman_log_items')
 export class Watchman_Log_Item {
@@ -16,11 +17,12 @@ export class Watchman_Log_Item {
   @JoinColumn({ name: 'watchman_log_id' })
   watchman_log!: Watchman_Logs;
 
-  @Column({ type: 'varchar', nullable: true })
-  dimension!: string;
+  @Column({ name: 'item_id', nullable: true })
+  itemId!: number | null;
 
-  @Column({ type: 'varchar', nullable: true })
-  name!: string;
+  @ManyToOne(() => InventoryItem, { eager: false, nullable: true })
+  @JoinColumn({ name: 'item_id' })
+  item!: InventoryItem;
 
   @Column({ type: 'int' })
   quantity!: number;

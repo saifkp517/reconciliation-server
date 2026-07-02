@@ -23,6 +23,13 @@ export class InventoryItem {
    * Running stock total. Always kept in sync by InventoryStoreService.
    * Never mutate directly — go through a transaction row.
    */
+  @Column({
+    type: 'enum',
+    enum: ['raw_material', 'product'],
+    default: 'product',
+  })
+  type!: 'raw_material' | 'product';
+
   @Column({ type: 'decimal', precision: 12, scale: 3, default: 0 })
   stock!: number;
 
